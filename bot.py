@@ -13,6 +13,7 @@ BUILDING_MAPS = {
     "ALRAIS2": "https://maps.app.goo.gl/1671T2oFdhV6UuVw5",
     "AJWAD": "https://maps.app.goo.gl/SKAWGzcLmcEqfbWcA",
     "ALRAIS3": "https://maps.app.goo.gl/kXt4cFLLHAs4nDBz8",
+    "DURRA": "https://maps.app.goo.gl/T1P75ecrCnh8jrN4A",
     "MAN.SITTEEN": "https://maps.app.goo.gl/H6AKvdriSzFxv1BA8",
     "NUZHA1": "https://maps.app.goo.gl/jfD6UMQFmo9BhRz57",
     "NUZHA2": "https://maps.app.goo.gl/KMGfKadewiNL5vBSA",
