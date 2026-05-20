@@ -3,10 +3,11 @@ import json
 import os
 import re
 import time
-import http.server
 import gspread
+import http.server
+import socketserver
 from google.oauth2.service_account import Credentials
-from threading import Lock, Thread
+from threading import Lock
 from datetime import datetime
 
 BOT_TOKEN = os.environ.get("NUSUK_BOT_TOKEN", "")
@@ -31,25 +32,10 @@ def init_sheet():
         creds = Credentials.from_service_account_info(key, scopes=["https://www.googleapis.com/auth/spreadsheets"])
         client = gspread.authorize(creds)
         sheet = client.open_by_key(SHEET_ID).sheet1
-        load_store()
+        store = sheet.get_all_records()
         print(f"[SHEETS] Connected. {len(store)} records")
     except Exception as e:
-        print(f"[SHEETS INIT ERROR] {e}")
-
-
-def load_store():
-    global store
-    if not sheet:
-        return
-    try:
-        records = sheet.get_all_records()
-        store = records
-        save_store_backup()
-    except Exception as e:
-        print(f"[LOAD ERROR] {e}")
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r") as f:
-                store = json.load(f)
+        print(f"[SHEETS] {e}")
 
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
@@ -75,7 +61,7 @@ def append_to_sheet(record):
         ])
         return True
     except Exception as e:
-        print(f"[APPEND ERROR] {e}")
+        print(f"[SHEETS APPEND] {e}")
         return False
 
 
@@ -357,23 +343,46 @@ def confirm_handler(message):
     show_main_menu(message.chat.id)
 
 
-def run_health_server():
-    server = http.server.HTTPServer(("0.0.0.0", PORT), http.server.SimpleHTTPRequestHandler)
-    print(f"[HTTP] Health server on port {PORT}")
-    server.serve_forever()
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def do_POST(self):
+        if self.path == "/webhook":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = self.rfile.read(length)
+                update = telebot.types.Update.de_json(json.loads(body))
+                bot.process_new_updates([update])
+            except Exception as e:
+                print(f"[WEBHOOK] {e}")
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass
 
 
 if __name__ == "__main__":
     print("Connecting to Google Sheets...")
     init_sheet()
-    Thread(target=run_health_server, daemon=True).start()
-    time.sleep(1)
-    print("Nusuk bot started...")
-    while True:
+
+    # set webhook
+    wh_url = f"https://hajj-nusuk-bot.onrender.com/webhook"
+    for i in range(5):
         try:
-            bot.remove_webhook()
-            time.sleep(2)
-            bot.polling(none_stop=True, timeout=30)
+            bot.set_webhook(url=wh_url)
+            print(f"Webhook set to {wh_url}")
+            break
         except Exception as e:
-            print(f"[POLLING] {e}, retrying in 5s...")
-            time.sleep(5)
+            print(f"[WEBHOOK] attempt {i+1}: {e}")
+            time.sleep(3)
+
+    # start HTTP server (health + webhook)
+    socketserver.TCPServer.allow_reuse_address = True
+    server = http.server.HTTPServer(("0.0.0.0", PORT), WebhookHandler)
+    print(f"[HTTP] Server on port {PORT}")
+    server.serve_forever()
