@@ -9,7 +9,36 @@ import tempfile
 from threading import Lock
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1Nzf0kGuhmwiAAcfGSl6xxkRYbtjGuaXujvKcq_oqgWg/export?format=csv"
-MAPS_URL = "https://maps.app.goo.gl/1671T2oFdhV6UuVw5"
+BUILDING_MAPS = {
+    "ALRAIS2": "https://maps.app.goo.gl/1671T2oFdhV6UuVw5",
+    "AJWAD": "https://maps.app.goo.gl/SKAWGzcLmcEqfbWcA",
+    "ALRAIS3": "https://maps.app.goo.gl/kXt4cFLLHAs4nDBz8",
+    "MAN.SITTEEN": "https://maps.app.goo.gl/H6AKvdriSzFxv1BA8",
+    "NUZHA1": "https://maps.app.goo.gl/jfD6UMQFmo9BhRz57",
+    "NUZHA2": "https://maps.app.goo.gl/KMGfKadewiNL5vBSA",
+    "RAIES1": "https://maps.app.goo.gl/qkH1GQuTm8C8nAGG7",
+    "THARAWAT2": "https://maps.app.goo.gl/wVhu49YPr2DLALy38",
+    "THARAWAT3": "https://maps.app.goo.gl/QWnWixiv6nLA7E2R7",
+    "THARAWAT4": "https://maps.app.goo.gl/Qqcw8K5PQDoYQ3PT9",
+    "THARAWAT5": "https://maps.app.goo.gl/bEd7nUrjpU4PgwuaA",
+    "THARAWAT6": "https://maps.app.goo.gl/bEd7nUrjpU4PgwuaA",
+}
+
+BUILDING_NAMES = {
+    "ALRAIS2": "مبنى الرايس 2",
+    "AJWAD": "مبنى الجواد",
+    "ALRAIS3": "مبنى الرايس 3",
+    "DURRA": "مبنى الدرة",
+    "MAN.SITTEEN": "برج المنار",
+    "NUZHA1": "مبنى النزهة 1",
+    "NUZHA2": "مبنى النزهة 2",
+    "RAIES1": "مبنى الرايس 1",
+    "THARAWAT2": "مبنى الثروات 2",
+    "THARAWAT3": "مبنى الثروات 3",
+    "THARAWAT4": "مبنى الثروات 4",
+    "THARAWAT5": "مبنى الثروات 5",
+    "THARAWAT6": "مبنى الثروات 6",
+}
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(env_path):
@@ -119,19 +148,22 @@ def refresh_loop():
 
 def parse_room(room_str):
     parts = room_str.split("_")
-    if len(parts) >= 5 and parts[0] == "ALRAIS2":
+    if len(parts) >= 5:
+        building_code = parts[0]
         floor = parts[2]
         room = parts[4]
-        return f"المبنى الرئيسي", f"الدور {floor}", f"غرفة {room}"
-    return "", "", room_str
+        name = BUILDING_NAMES.get(building_code, building_code)
+        maps_url = BUILDING_MAPS.get(building_code, "")
+        return name, f"الدور {floor}", f"غرفة {room}", maps_url
+    return room_str, "", "", ""
 
 
 gender_map = {"male": "ذكر", "female": "أنثى"}
 
 
 def process_image_file(message, file_id):
+    bot.reply_to(message, "🔄 جاري تحليل الصورة...")
     try:
-        bot.reply_to(message, "🔄 جاري تحليل الصورة...")
         file_info = bot.get_file(file_id)
         downloaded = bot.download_file(file_info.file_path)
 
@@ -165,19 +197,53 @@ def process_image_file(message, file_id):
             return
 
         gender = gender_map.get(row["Gender"], row["Gender"])
-        building, floor, room = parse_room(row["Room Number"])
-    response = (
-        f"✅ *تم العثور على الحاج/الحاجة*\n\n"
-        f"👤 *الاسم:* {row['Name']}\n"
-        f"⚧ *الجنس:* {gender}\n"
-        f"🛂 *جواز السفر:* `{row['Passport Number']}\n"
-        f"🏢 *المبنى:* {building}\n"
-        f"📌 *الدور:* {floor}\n"
-        f"🚪 *الغرفة:* {room}\n"
-        f"👥 *المجموعة:* {row['Group']}\n"
-        f"📍 [الموقع على الخريطة]({MAPS_URL})"
+        building, floor, room, maps_url = parse_room(row["Room Number"])
+
+        response = (
+            f"✅ *تم العثور على الحاج/الحاجة*\n\n"
+            f"👤 *الاسم:* {row['Name']}\n"
+            f"⚧ *الجنس:* {gender}\n"
+            f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
+            f"🏢 *المبنى:* {building}\n"
+            f"📌 *الدور:* {floor}\n"
+            f"🚪 *الغرفة:* {room}\n"
+            f"👥 *المجموعة:* {row['Group']}"
+        )
+        if maps_url:
+            response += f"\n📍 [الموقع على الخريطة]({maps_url})"
+        bot.reply_to(message, response, parse_mode="Markdown", disable_web_page_preview=False)
+
+    except Exception as e:
+        print(f"Image error: {e}")
+        try:
+            bot.send_message(message.chat.id, "❌ حدث خطأ. أرسل الرقم كتابةً.")
+        except:
+            pass
+
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    process_image_file(message, message.photo[-1].file_id)
+
+
+@bot.message_handler(content_types=["document"])
+def handle_document(message):
+    if message.document and message.document.mime_type and message.document.mime_type.startswith("image/"):
+        process_image_file(message, message.document.file_id)
+    else:
+        bot.reply_to(message, "أرسل صورة أو رقم جواز السفر كتابةً.")
+
+
+@bot.message_handler(commands=["start", "help"])
+def send_welcome(message):
+    text = (
+        "🏨 *بوت الاستعلام عن إسكان الحجاج*\n\n"
+        "📱 أرسل رقم *جواز السفر* نصاً\n"
+        "🖼 أو أرسل *صورة* تحتوي على رقم الجواز\n\n"
+        "مثال: `G3386134`\n\n"
+        "🔹 `/stats` — عدد الحجاج المسجلين"
     )
-    bot.reply_to(message, response, parse_mode="Markdown", disable_web_page_preview=False)
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["refresh"])
@@ -207,7 +273,7 @@ def lookup_passport(message):
         return
 
     gender = gender_map.get(row["Gender"], row["Gender"])
-    building, floor, room = parse_room(row["Room Number"])
+    building, floor, room, maps_url = parse_room(row["Room Number"])
 
     response = (
         f"✅ *تم العثور على الحاج/الحاجة*\n\n"
@@ -217,9 +283,10 @@ def lookup_passport(message):
         f"🏢 *المبنى:* {building}\n"
         f"📌 *الدور:* {floor}\n"
         f"🚪 *الغرفة:* {room}\n"
-        f"👥 *المجموعة:* {row['Group']}\n"
-        f"📍 [الموقع على الخريطة]({MAPS_URL})"
+        f"👥 *المجموعة:* {row['Group']}"
     )
+    if maps_url:
+        response += f"\n📍 [الموقع على الخريطة]({maps_url})"
     bot.reply_to(message, response, parse_mode="Markdown")
 
 
