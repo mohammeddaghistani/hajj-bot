@@ -51,12 +51,17 @@ user_state = {}
 
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
+    name = message.from_user.first_name or "حبيب"
     text = (
-        "📋 *بوت طلبات بطاقات نسك*\n\n"
-        "يرسل الطلبات مباشرة لـ Google Sheets.\n\n"
-        "🔹 `/new` — طلب جديد\n"
-        "🔹 `/count` — عدد الطلبات المسجلة\n"
-        "🔹 `/history` — آخر 10 طلبات"
+        f"وعليكم السلام ورحمة الله وبركاته {name} 🤍\n\n"
+        "📋 *بوت جمع طلبات بطاقات نسك*\n"
+        "هذا البوت مخصص لموظفي الحج لتسجيل طلبات استلام البطاقات.\n\n"
+        "*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n"
+        "🔹 `/new` → بدء طلب جديد\n"
+        "🔹 `/count` → عدد الطلبات المسجلة\n"
+        "🔹 `/history` → آخر 10 طلبات\n\n"
+        "*-*-*-*-*-*-*-*-*-*-*-*-*-*\n\n"
+        "👳🏼‍♂️ *ملاحظة:* جميع الطلبات تُسجل مباشرة في Google Sheets بشكل لحظي."
     )
     bot.reply_to(message, text, parse_mode="Markdown")
 
