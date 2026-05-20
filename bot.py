@@ -193,6 +193,12 @@ T = {
         "ur": "✅ زبان تبدیل کر دی گئی",
         "ha": "✅ An canza harshe zuwa",
     },
+    "multiple": {
+        "ar": "⚠️ يوجد أكثر من حاج بهذه الأرقام:\nالرجاء إرسال رقم الجواز كاملاً مع الحرف",
+        "en": "⚠️ Multiple pilgrims found with these digits:\nPlease send the full passport number with the letter",
+        "ur": "⚠️ ان اعداد کے ساتھ ایک سے زیادہ حاجی ملے:\nبراہ کرم پاسپورٹ نمبر حرف سمیت بھیجیں",
+        "ha": "⚠️ An sami mahajja fiye da ɗaya da waɗannan lambobin:\nDa fatan a aika cikakken lambar fasfo tare da harafin",
+    },
 }
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -231,13 +237,15 @@ def extract_passport(text):
 def lookup_passport_number(passport, with_letter):
     row = data.get(passport)
     if row:
-        return row
+        return [row]
     if passport.isdigit():
         digits = passport.lstrip("0")
+        matches = []
         for p, r in data.items():
             pd = p[1:].lstrip("0")
             if pd == digits or pd == passport or pd == passport[1:]:
-                return r
+                matches.append(r)
+        return matches
     return None
 
 
@@ -356,11 +364,17 @@ def process_image_file(message, file_id):
             return
 
         with lock:
-            row = lookup_passport_number(result, with_letter)
+            matches = lookup_passport_number(result, with_letter)
 
-        if not row:
+        if not matches:
             bot.send_message(cid, f"{tr('not_found_result', lang)} `{result}`", parse_mode="Markdown")
             return
+
+        if len(matches) > 1:
+            bot.send_message(cid, tr("multiple", lang))
+            return
+
+        row = matches[0]
 
         gender = GENDER.get(row["Gender"], {}).get(lang, row["Gender"])
         building, floor, room, maps_url = parse_room(row["Room Number"], lang)
@@ -453,7 +467,14 @@ def lookup_passport(message):
     is_digits = passport.isdigit()
     with lock:
         if is_digits:
-            row = lookup_passport_number(passport, False)
+            matches = lookup_passport_number(passport, False)
+            if not matches:
+                row = None
+            elif len(matches) > 1:
+                bot.reply_to(message, tr("multiple", lang))
+                return
+            else:
+                row = matches[0]
         else:
             row = data.get(passport)
 
