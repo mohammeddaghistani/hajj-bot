@@ -50,14 +50,27 @@ def refresh_loop():
         time.sleep(300)
 
 
+def parse_room(room_str):
+    parts = room_str.split("_")
+    if len(parts) >= 5 and parts[0] == "ALRAIS2":
+        floor = parts[2]
+        room = parts[4]
+        return f"المبنى الرئيسي", f"الدور {floor}", f"غرفة {room}"
+    return "", "", room_str
+
+
+gender_map = {"male": "ذكر", "female": "أنثى"}
+
+
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
     text = (
-        "مرحباً! أرسل رقم جواز السفر للحصول على معلومات الغرفة.\n\n"
-        "مثال: G3386134\n\n"
-        "/refresh  لتحديث البيانات من Google Sheets"
+        "🏨 *بوت الاستعلام عن إسكان الحجاج*\n\n"
+        "أرسل رقم *جواز السفر* للحصول على معلومات الغرفة.\n\n"
+        "مثال: `G3386134`\n\n"
+        "🔹 `/stats` — عدد الحجاج المسجلين"
     )
-    bot.reply_to(message, text)
+    bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["refresh"])
@@ -69,6 +82,13 @@ def refresh_data(message):
         bot.reply_to(message, f"❌ فشل التحديث: {e}")
 
 
+@bot.message_handler(commands=["stats"])
+def send_stats(message):
+    with lock:
+        count = len(data)
+    bot.reply_to(message, f"📊 إجمالي الحجاج المسجلين: *{count}*", parse_mode="Markdown")
+
+
 @bot.message_handler(func=lambda m: True)
 def lookup_passport(message):
     passport = message.text.strip().upper()
@@ -76,17 +96,23 @@ def lookup_passport(message):
         row = data.get(passport)
 
     if not row:
-        bot.reply_to(message, "❌ لم يتم العثور على هذا الرقم")
+        bot.reply_to(message, "❌ *لم يتم العثور* على هذا الرقم\n\nتأكد من كتابة رقم جواز السفر بشكل صحيح.", parse_mode="Markdown")
         return
 
+    gender = gender_map.get(row["Gender"], row["Gender"])
+    building, floor, room = parse_room(row["Room Number"])
+
     response = (
-        f"🆔 الاسم: {row['Name']}\n"
-        f"⚧ الجنس: {row['Gender']}\n"
-        f"🛂 جواز السفر: {row['Passport Number']}\n"
-        f"🛏 رقم الغرفة: {row['Room Number']}\n"
-        f"👥 المجموعة: {row['Group']}"
+        f"✅ *تم العثور على الحاج/الحاجة*\n\n"
+        f"👤 *الاسم:* {row['Name']}\n"
+        f"⚧ *الجنس:* {gender}\n"
+        f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
+        f"🏢 *المبنى:* {building}\n"
+        f"📌 *الدور:* {floor}\n"
+        f"🚪 *الغرفة:* {room}\n"
+        f"👥 *المجموعة:* {row['Group']}"
     )
-    bot.reply_to(message, response)
+    bot.reply_to(message, response, parse_mode="Markdown")
 
 
 def start_http():
