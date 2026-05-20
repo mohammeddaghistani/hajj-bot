@@ -109,11 +109,9 @@ def parse_room(room_str):
 gender_map = {"male": "ذكر", "female": "أنثى"}
 
 
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
+def process_image_file(message, file_id):
     try:
-        bot.reply_to(message, "🔄 جاري قراءة الصورة...")
-        file_id = message.photo[-1].file_id
+        bot.reply_to(message, "🔄 جاري تحليل الصورة...")
         file_info = bot.get_file(file_id)
         downloaded = bot.download_file(file_info.file_path)
 
@@ -130,9 +128,13 @@ def handle_photo(message):
         finally:
             os.unlink(tmp_path)
 
-        result, with_letter = extract_passport(text) if text else (None, False)
+        if not text:
+            bot.send_message(message.chat.id, "❌ لم أتمكن من قراءة الصورة.\nأرسل الرقم كتابةً.")
+            return
+
+        result, with_letter = extract_passport(text)
         if not result:
-            bot.send_message(message.chat.id, "❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.")
+            bot.send_message(message.chat.id, "❌ لم أجد رقم جواز سفر في الصورة.\nأرسل الرقم كتابةً.")
             return
 
         with lock:
@@ -156,11 +158,24 @@ def handle_photo(message):
         )
         bot.send_message(message.chat.id, response, parse_mode="Markdown")
     except Exception as e:
-        print(f"Photo handler error: {e}")
+        print(f"Image error: {e}")
         try:
-            bot.send_message(message.chat.id, "❌ حدث خطأ غير متوقع. أرسل الرقم كتابةً.")
+            bot.send_message(message.chat.id, "❌ حدث خطأ. أرسل الرقم كتابةً.")
         except:
             pass
+
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    process_image_file(message, message.photo[-1].file_id)
+
+
+@bot.message_handler(content_types=["document"])
+def handle_document(message):
+    if message.document and message.document.mime_type and message.document.mime_type.startswith("image/"):
+        process_image_file(message, message.document.file_id)
+    else:
+        bot.reply_to(message, "أرسل صورة أو رقم جواز السفر كتابةً.")
 
 
 @bot.message_handler(commands=["start", "help"])
