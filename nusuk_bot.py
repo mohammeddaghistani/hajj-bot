@@ -11,7 +11,11 @@ from datetime import datetime
 BOT_TOKEN = os.environ.get("NUSUK_BOT_TOKEN", "")
 SHEETS_URL = os.environ.get("SHEETS_URL", "")
 DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
-PORT = int(os.environ.get("PORT", 8080))
+PORT = 8080
+try:
+    PORT = int(os.environ.get("PORT", 8080))
+except (ValueError, TypeError):
+    pass
 
 bot = telebot.TeleBot(BOT_TOKEN)
 lock = Lock()
