@@ -46,9 +46,11 @@ def lookup_passport_number(passport, with_letter):
     row = data.get(passport)
     if row:
         return row
-    if not with_letter and passport.isdigit():
+    if passport.isdigit():
+        digits = passport.lstrip("0")
         for p, r in data.items():
-            if p[1:] == passport or p[1:].lstrip("0") == passport.lstrip("0"):
+            pd = p[1:].lstrip("0")
+            if pd == digits or pd == passport or pd == passport[1:]:
                 return r
     return None
 
