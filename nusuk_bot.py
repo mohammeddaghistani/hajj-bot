@@ -1,18 +1,21 @@
 import telebot
 import json
 import os
-import time
 import re
 import requests
-import http.server
-from threading import Lock, Thread
+import time
+from threading import Lock
 from datetime import datetime
+from flask import Flask, request
 
 BOT_TOKEN = os.environ.get("NUSUK_BOT_TOKEN", "")
 SHEETS_URL = os.environ.get("SHEETS_URL", "")
 DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
+PORT = int(os.environ.get("PORT", 8080))
+WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", f"https://hajj-nusuk-bot.onrender.com")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
 lock = Lock()
 submitted = []
 
@@ -44,6 +47,21 @@ def append_to_sheets(record):
     except Exception as e:
         print(f"[SHEETS ERROR] {e}")
         return False
+
+
+@app.route("/")
+def health():
+    return "OK", 200
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        update = telebot.types.Update.de_json(request.get_json())
+        bot.process_new_updates([update])
+    except Exception as e:
+        print(f"[WEBHOOK ERROR] {e}")
+    return "OK", 200
 
 
 user_state = {}
@@ -200,29 +218,11 @@ def confirm_handler(message):
         bot.reply_to(message, "❌ تم إلغاء الطلب.\n\n`/new` — طلب جديد", parse_mode="Markdown")
 
 
-def run_health_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = http.server.HTTPServer(("0.0.0.0", port), http.server.SimpleHTTPRequestHandler)
-    print(f"[HTTP] Health server on port {port}")
-    server.serve_forever()
-
-
-load_submitted()
-Thread(target=run_health_server, daemon=True).start()
-time.sleep(3)
-
-print("Nusuk bot started...")
-while True:
-    try:
-        bot.remove_webhook()
-        time.sleep(2)
-        bot.polling(none_stop=True, skip_pending=True, timeout=30)
-    except telebot.apihelper.ApiTelegramException as e:
-        if "409" in str(e):
-            print("[409] Conflict caught, retrying in 10s...")
-            time.sleep(10)
-        else:
-            raise
-    except Exception as e:
-        print(f"[ERROR] {e}, retrying in 10s...")
-        time.sleep(10)
+if __name__ == "__main__":
+    load_submitted()
+    print("Nusuk bot started...")
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+    print(f"Webhook set to {WEBHOOK_URL}/webhook")
+    app.run(host="0.0.0.0", port=PORT)
