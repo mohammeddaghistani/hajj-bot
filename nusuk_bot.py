@@ -209,5 +209,11 @@ def run_health_server():
 
 load_submitted()
 Thread(target=run_health_server, daemon=True).start()
+time.sleep(1)
 print("Nusuk bot started...")
-bot.infinity_polling()
+try:
+    bot.remove_webhook()
+except Exception:
+    pass
+time.sleep(1)
+bot.polling(none_stop=True, skip_pending=True)
