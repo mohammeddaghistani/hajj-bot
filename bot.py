@@ -93,7 +93,7 @@ gender_map = {"male": "ذكر", "female": "أنثى"}
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
-    msg = bot.reply_to(message, "🔄 جاري قراءة الصورة...")
+    bot.reply_to(message, "🔄 جاري قراءة الصورة...")
     file_id = message.photo[-1].file_id
     file_info = bot.get_file(file_id)
     downloaded = bot.download_file(file_info.file_path)
@@ -109,7 +109,7 @@ def handle_photo(message):
 
     match = extract_passport(text)
     if not match:
-        bot.edit_message_text("❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.", chat_id=msg.chat.id, message_id=msg.message_id)
+        bot.send_message(message.chat.id, "❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.")
         return
 
     passport = match.group()
@@ -117,7 +117,7 @@ def handle_photo(message):
         row = data.get(passport)
 
     if not row:
-        bot.edit_message_text(f"❌ لم يتم العثور على رقم الجواز `{passport}`", chat_id=msg.chat.id, message_id=msg.message_id, parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"❌ لم يتم العثور على رقم الجواز `{passport}`", parse_mode="Markdown")
         return
 
     gender = gender_map.get(row["Gender"], row["Gender"])
@@ -132,7 +132,7 @@ def handle_photo(message):
         f"🚪 *الغرفة:* {room}\n"
         f"👥 *المجموعة:* {row['Group']}"
     )
-    bot.edit_message_text(response, chat_id=msg.chat.id, message_id=msg.message_id, parse_mode="Markdown")
+    bot.send_message(message.chat.id, response, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["start", "help"])
