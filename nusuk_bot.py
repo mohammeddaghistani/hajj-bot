@@ -371,7 +371,8 @@ if __name__ == "__main__":
     init_sheet()
 
     # set webhook
-    wh_url = f"https://hajj-nusuk-bot.onrender.com/webhook"
+    base_url = os.environ.get("RENDER_EXTERNAL_URL", "https://hajj-nusuk-bot.onrender.com").rstrip("/")
+    wh_url = f"{base_url}/webhook"
     for i in range(5):
         try:
             bot.set_webhook(url=wh_url)
