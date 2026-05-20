@@ -2,15 +2,16 @@ import telebot
 import json
 import os
 import re
-import requests
 import time
 import http.server
+import gspread
+from google.oauth2.service_account import Credentials
 from threading import Lock, Thread
 from datetime import datetime
 
 BOT_TOKEN = os.environ.get("NUSUK_BOT_TOKEN", "")
-SHEETS_URL = os.environ.get("SHEETS_URL", "")
-DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
+GOOGLE_KEY_JSON = os.environ.get("GOOGLE_SHEETS_KEY", "{}")
+SHEET_ID = os.environ.get("SHEET_ID", "")
 PORT = 8080
 try:
     PORT = int(os.environ.get("PORT", 8080))
@@ -19,22 +20,39 @@ except (ValueError, TypeError):
 
 bot = telebot.TeleBot(BOT_TOKEN)
 lock = Lock()
+sheet = None
 store = []
+
+
+def init_sheet():
+    global sheet, store
+    try:
+        key = json.loads(GOOGLE_KEY_JSON)
+        creds = Credentials.from_service_account_info(key, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SHEET_ID).sheet1
+        load_store()
+        print(f"[SHEETS] Connected. {len(store)} records")
+    except Exception as e:
+        print(f"[SHEETS INIT ERROR] {e}")
 
 
 def load_store():
     global store
+    if not sheet:
+        return
     try:
-        r = requests.get(f"{SHEETS_URL}?action=all", timeout=10)
-        if r.status_code == 200 and isinstance(r.json(), list):
-            store = r.json()
-            save_store_backup()
-            return
+        records = sheet.get_all_records()
+        store = records
+        save_store_backup()
     except Exception as e:
-        print(f"[LOAD] {e}")
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            store = json.load(f)
+        print(f"[LOAD ERROR] {e}")
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r") as f:
+                store = json.load(f)
+
+
+DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
 
 
 def save_store_backup():
@@ -42,31 +60,22 @@ def save_store_backup():
         json.dump(store, f, ensure_ascii=False, indent=2)
 
 
-def sheets_get(action, **params):
+def append_to_sheet(record):
+    if not sheet:
+        return False
     try:
-        params["action"] = action
-        r = requests.get(SHEETS_URL, params=params, timeout=10)
-        return r.json() if r.status_code == 200 else None
+        sheet.append_row([
+            record["date"],
+            record["passport"],
+            "لم يستلم" if record["status"] == "not_received" else "بدل فاقد",
+            record["hotel"],
+            record["floor"],
+            record["room"],
+            record["employee"],
+        ])
+        return True
     except Exception as e:
-        print(f"[SHEETS GET] {e}")
-        return None
-
-
-def sheets_post(record):
-    try:
-        s = requests.Session()
-        s.get(SHEETS_URL, timeout=10)
-        r = s.post(SHEETS_URL, json={
-            "passport": record["passport"],
-            "status": record["status"],
-            "hotel": record["hotel"],
-            "floor": record["floor"],
-            "room": record["room"],
-            "employee": record["employee"],
-        }, timeout=10)
-        return r.status_code == 200
-    except Exception as e:
-        print(f"[SHEETS POST] {e}")
+        print(f"[APPEND ERROR] {e}")
         return False
 
 
@@ -153,40 +162,46 @@ def back_handler(message):
 
 @bot.message_handler(commands=["count"])
 def cmd_count(message=None):
-    result = sheets_get("count")
-    count = result["count"] if result else len(store)
-    txt = (f"📊 *Total Requests — إجمالي الطلبات*\n\n*{count}* requests / طلب")
+    with lock:
+        count = len(store)
+    txt = f"📊 *Total Requests — إجمالي الطلبات*\n\n*{count}* requests / طلب"
     if message:
         bot.reply_to(message, txt, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["history"])
 def cmd_history(message=None):
-    result = sheets_get("all")
-    data = result if isinstance(result, list) else store
+    with lock:
+        data = list(store)
     if not data:
         bot.reply_to(message, "📭 *No requests yet* — لا توجد طلبات بعد", parse_mode="Markdown")
         return
     recent = data[-10:]
     lines = ["🗂 *Last 10 — آخر ١٠:*\n"]
     for r in reversed(recent):
-        s = r.get("status", "")
-        p = r.get("passport", "N/A")
-        h = r.get("hotel", "?")
-        f = r.get("floor", "?")
-        rm = r.get("room", "?")
+        s = r.get("Status", "") or r.get("status", "")
+        p = r.get("Passport", "") or r.get("passport", "N/A")
+        h = r.get("Accommodation", "") or r.get("hotel", "?")
+        f = r.get("Floor", "") or r.get("floor", "?")
+        rm = r.get("Room", "") or r.get("room", "?")
         lines.append(f"`{p}` {s}\n    {h} | F{f} R{rm}")
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["stats"])
 def cmd_stats(message=None):
-    result = sheets_get("stats")
-    if not result:
-        bot.reply_to(message, "⚠️ *Stats unavailable* — غير متوفرة حالياً", parse_mode="Markdown")
+    with lock:
+        data = list(store)
+    if not data:
+        bot.reply_to(message, "📭 *No data* — لا توجد بيانات", parse_mode="Markdown")
         return
-    hotels = result.get("hotels", {})
-    statuses = result.get("statuses", {})
+    hotels = {}
+    statuses = {}
+    for r in data:
+        h = r.get("Accommodation", "") or r.get("hotel", "غير محدد")
+        s = r.get("Status", "") or r.get("status", "")
+        hotels[h] = hotels.get(h, 0) + 1
+        statuses[s] = statuses.get(s, 0) + 1
     lines = ["📈 *Statistics — إحصائيات*\n"]
     lines.append("*By Status / حسب الحالة:*")
     for s, c in statuses.items():
@@ -217,8 +232,12 @@ def get_passport(message):
     if not re.match(r"^[A-Z]\d{6,9}$", passport):
         bot.reply_to(message, "❌ Invalid format. Example: `G3386134`", parse_mode="Markdown")
         return
-    check = sheets_get("check", passport=passport)
-    if check and check.get("exists"):
+    with lock:
+        exists = any(
+            (r.get("Passport", "") or r.get("passport", "")).upper() == passport
+            for r in store
+        )
+    if exists:
         bot.reply_to(message, f"⚠️ Passport *{passport}* already exists / موجود مسبقاً", parse_mode="Markdown")
         return
     user_state[cid]["passport"] = passport
@@ -313,12 +332,18 @@ def confirm_handler(message):
         return cancel_state(cid)
     if text in ("تم", "تأكيد", "Confirm", "confirm", "yes", "نعم"):
         s = user_state[cid]
-        status_label = "لم يستلم" if s["status"] == "not_received" else "بدل فاقد"
         record = {k: s[k] for k in ("passport", "status", "hotel", "floor", "room", "employee", "date")}
-        ok = sheets_post(record)
+        ok = append_to_sheet(record)
         with lock:
-            store.append({"passport": s["passport"], "status": status_label, "hotel": s["hotel"],
-                          "floor": s["floor"], "room": s["room"], "employee": s["employee"], "date": s["date"]})
+            store.append({
+                "Passport": s["passport"],
+                "Status": "لم يستلم" if s["status"] == "not_received" else "بدل فاقد",
+                "Accommodation": s["hotel"],
+                "Floor": s["floor"],
+                "Room": s["room"],
+                "Employee": s["employee"],
+                "Date": s["date"],
+            })
             save_store_backup()
             total = len(store)
         del user_state[cid]
@@ -339,15 +364,14 @@ def run_health_server():
 
 
 if __name__ == "__main__":
-    print("Loading data...")
-    load_store()
-    print(f"Loaded {len(store)} records")
+    print("Connecting to Google Sheets...")
+    init_sheet()
     for i in range(5):
         try:
             bot.remove_webhook()
             break
         except Exception as e:
-            print(f"[WEBHOOK CLEAR] attempt {i+1}: {e}")
+            print(f"[WEBHOOK] attempt {i+1}: {e}")
             time.sleep(2)
     Thread(target=run_health_server, daemon=True).start()
     time.sleep(1)
@@ -356,5 +380,5 @@ if __name__ == "__main__":
         try:
             bot.polling(none_stop=True, timeout=30)
         except Exception as e:
-            print(f"[POLLING ERROR] {e}, retrying in 5s...")
+            print(f"[POLLING] {e}, retrying...")
             time.sleep(5)
