@@ -4,18 +4,16 @@ import os
 import re
 import requests
 import time
-from threading import Lock
+import http.server
+from threading import Lock, Thread
 from datetime import datetime
-from flask import Flask, request
 
 BOT_TOKEN = os.environ.get("NUSUK_BOT_TOKEN", "")
 SHEETS_URL = os.environ.get("SHEETS_URL", "")
 DATA_FILE = os.path.join(os.path.dirname(__file__), "nusuk_requests.json")
 PORT = int(os.environ.get("PORT", 8080))
-WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", f"https://hajj-nusuk-bot.onrender.com")
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
 lock = Lock()
 store = []
 
@@ -24,12 +22,12 @@ def load_store():
     global store
     try:
         r = requests.get(f"{SHEETS_URL}?action=all", timeout=10)
-        if r.status_code == 200:
+        if r.status_code == 200 and isinstance(r.json(), list):
             store = r.json()
             save_store_backup()
             return
     except Exception as e:
-        print(f"[LOAD ERROR] {e}")
+        print(f"[LOAD] {e}")
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             store = json.load(f)
@@ -46,7 +44,7 @@ def sheets_get(action, **params):
         r = requests.get(SHEETS_URL, params=params, timeout=10)
         return r.json() if r.status_code == 200 else None
     except Exception as e:
-        print(f"[SHEETS GET ERROR] {e}")
+        print(f"[SHEETS GET] {e}")
         return None
 
 
@@ -62,11 +60,11 @@ def sheets_post(record):
         }, timeout=10)
         return r.status_code == 200
     except Exception as e:
-        print(f"[SHEETS POST ERROR] {e}")
+        print(f"[SHEETS POST] {e}")
         return False
 
 
-def show_main_menu(chat_id, edit_msg_id=None):
+def show_main_menu(chat_id):
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         telebot.types.InlineKeyboardButton("📝 ١ - طلب جديد", callback_data="new"),
@@ -75,31 +73,22 @@ def show_main_menu(chat_id, edit_msg_id=None):
         telebot.types.InlineKeyboardButton("📈 ٤ - الإحصائيات", callback_data="stats"),
     )
     text = (
-        "╔══════════════════╗\n"
-        "    ✨ *Nusuk Card System* ✨\n"
-        "    *نظام بطاقات نسك*\n"
-        "╚══════════════════╝\n\n"
+        "✨ *Nusuk Card System* ✨\n"
+        "*نظام بطاقات نسك*\n\n"
         "Send a number or tap:\n"
         "ارسـل الرقم أو اضغط:\n\n"
         "1️⃣ New Request — طلب جديد\n"
         "2️⃣ Count — العدد\n"
         "3️⃣ Last 10 — آخر ١٠\n"
         "4️⃣ Statistics — إحصائيات\n\n"
-        "╔══════════════════╗\n"
-        "  👳🏼‍♂️ Real-time Google Sheets\n"
-        "╚══════════════════╝"
+        "👳🏼‍♂️ Real-time Google Sheets"
     )
-    if edit_msg_id:
-        bot.edit_message_text(text, chat_id, edit_msg_id, parse_mode="Markdown", reply_markup=markup)
-    else:
-        bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 
-def cancel_state(cid, msg=None):
+def cancel_state(cid):
     if cid in user_state:
         del user_state[cid]
-    if msg:
-        bot.reply_to(msg, "❌ *Cancelled / ملغي*", parse_mode="Markdown")
     show_main_menu(cid)
 
 
@@ -110,19 +99,7 @@ def is_back(text):
     return any(w in text for w in BACK_WORDS)
 
 
-@app.route("/")
-def health():
-    return "OK", 200
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        update = telebot.types.Update.de_json(request.get_json())
-        bot.process_new_updates([update])
-    except Exception as e:
-        print(f"[WEBHOOK ERROR] {e}")
-    return "OK", 200
+user_state = {}
 
 
 @bot.callback_query_handler(func=lambda c: c.data in ("new", "count", "history", "stats"))
@@ -136,9 +113,6 @@ def handle_callback(c):
     elif c.data == "stats":
         cmd_stats(c.message)
     bot.answer_callback_query(c.id)
-
-
-user_state = {}
 
 
 @bot.message_handler(commands=["start", "help", "menu"])
@@ -167,88 +141,64 @@ def num_stats(message):
 
 
 @bot.message_handler(func=lambda m: m.text and is_back(m.text) and m.chat.id in user_state)
-def back_in_conversation(message):
-    cancel_state(message.chat.id, message)
+def back_handler(message):
+    cancel_state(message.chat.id)
 
 
 @bot.message_handler(commands=["count"])
 def cmd_count(message=None):
     result = sheets_get("count")
     count = result["count"] if result else len(store)
-    txt = (
-        "╔══════════════════╗\n"
-        "    📊 *Total Requests*\n"
-        "    *إجمالي الطلبات*\n"
-        "╚══════════════════╝\n\n"
-        f"*{count}* requests / طلب\n\n"
-        "Tap /start for menu"
-    )
+    txt = (f"📊 *Total Requests — إجمالي الطلبات*\n\n*{count}* requests / طلب")
     if message:
         bot.reply_to(message, txt, parse_mode="Markdown")
-    else:
-        return txt
 
 
 @bot.message_handler(commands=["history"])
 def cmd_history(message=None):
     result = sheets_get("all")
-    data = result if result else store
+    data = result if isinstance(result, list) else store
     if not data:
-        txt = "📭 *No requests yet* — لا توجد طلبات بعد"
-        if message:
-            bot.reply_to(message, txt, parse_mode="Markdown")
+        bot.reply_to(message, "📭 *No requests yet* — لا توجد طلبات بعد", parse_mode="Markdown")
         return
     recent = data[-10:]
-    lines = ["╔══════════════════╗\n    🗂 *Last 10 — آخر ١٠*\n╚══════════════════╝\n"]
+    lines = ["🗂 *Last 10 — آخر ١٠:*\n"]
     for r in reversed(recent):
-        s = "📭 Not received" if r.get("status", "").startswith("لم") or r.get("status") == "not_received" else "🔄 Lost"
+        s = r.get("status", "")
         p = r.get("passport", "N/A")
         h = r.get("hotel", "?")
         f = r.get("floor", "?")
         rm = r.get("room", "?")
-        lines.append(f"`{p}` {s}\n    {h} | دور {f} غ {rm}\n")
-    txt = "\n".join(lines)
-    if message:
-        bot.reply_to(message, txt, parse_mode="Markdown")
-    return txt
+        lines.append(f"`{p}` {s}\n    {h} | F{f} R{rm}")
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["stats"])
 def cmd_stats(message=None):
     result = sheets_get("stats")
     if not result:
-        txt = "⚠️ *Stats unavailable* — غير متوفرة حالياً"
-        if message:
-            bot.reply_to(message, txt, parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ *Stats unavailable* — غير متوفرة حالياً", parse_mode="Markdown")
         return
     hotels = result.get("hotels", {})
     statuses = result.get("statuses", {})
-    lines = ["╔══════════════════╗\n    📈 *Statistics — إحصائيات*\n╚══════════════════╝\n"]
-    lines.append("📌 *By Status / حسب الحالة:*")
+    lines = ["📈 *Statistics — إحصائيات*\n"]
+    lines.append("*By Status / حسب الحالة:*")
     for s, c in statuses.items():
         lines.append(f"  {s}: *{c}*")
-    lines.append("\n🏨 *By Accommodation / حسب السكن:*")
+    lines.append("\n*By Accommodation / حسب السكن:*")
     for h, c in sorted(hotels.items(), key=lambda x: -x[1]):
         lines.append(f"  {h}: *{c}*")
-    txt = "\n".join(lines)
-    if message:
-        bot.reply_to(message, txt, parse_mode="Markdown")
-    return txt
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["new"])
 def start_request(message=None):
     cid = message.chat.id
     user_state[cid] = {"step": "passport"}
-    txt = (
-        "╔══════════════════╗\n"
-        "    🛂 *Step 1/5 — Passport*\n"
-        "╚══════════════════╝\n\n"
-        "Send the pilgrim's passport number:\n"
-        "أرسل رقم جواز السفر\n\n"
-        "Example: `G3386134`\n\n"
-        "*Back / رجوع* to cancel"
-    )
+    txt = ("🛂 *Step 1/5 — Passport*\n\n"
+           "Send passport number / أرسل رقم الجواز\n"
+           "Example: `G3386134`\n\n"
+           "*Back / رجوع* to cancel")
     bot.send_message(cid, txt, parse_mode="Markdown")
 
 
@@ -256,30 +206,20 @@ def start_request(message=None):
 def get_passport(message):
     cid = message.chat.id
     passport = message.text.strip().upper()
+    if is_back(passport):
+        return cancel_state(cid)
     if not re.match(r"^[A-Z]\d{6,9}$", passport):
-        bot.reply_to(message,
-            "❌ *Invalid format*\n"
-            "Use letter + 6-9 digits\n"
-            "مثال: `G3386134`")
+        bot.reply_to(message, "❌ Invalid format. Example: `G3386134`", parse_mode="Markdown")
         return
     check = sheets_get("check", passport=passport)
     if check and check.get("exists"):
-        bot.reply_to(message,
-            f"⚠️ *Passport {passport} already exists!*\n"
-            f"*رقم الجواز موجود مسبقاً!*\n\n"
-            "Send another or /start for menu")
+        bot.reply_to(message, f"⚠️ Passport *{passport}* already exists / موجود مسبقاً", parse_mode="Markdown")
         return
     user_state[cid]["passport"] = passport
     user_state[cid]["step"] = "status"
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
     markup.add("📭 لم يستلم", "📭 Not Received", "🔄 بدل فاقد", "🔄 Lost")
-    bot.reply_to(message,
-        "╔══════════════════╗\n"
-        "    📌 *Step 2/5 — Status*\n"
-        "╚══════════════════╝\n\n"
-        "Choose card status:\n"
-        "اختر حالة البطاقة:",
-        reply_markup=markup, parse_mode="Markdown")
+    bot.reply_to(message, "📌 *Step 2/5 — Status*\nChoose / اختر:", reply_markup=markup, parse_mode="Markdown")
 
 
 @bot.message_handler(func=lambda m: user_state.get(m.chat.id, {}).get("step") == "status")
@@ -287,23 +227,17 @@ def get_status(message):
     cid = message.chat.id
     text = message.text.strip()
     if is_back(text):
-        return cancel_state(cid, message)
-    if any(w in text for w in ["لم يستلم", "Not Received"]):
+        return cancel_state(cid)
+    if "لم يستلم" in text or "Not Received" in text:
         user_state[cid]["status"] = "not_received"
-    elif any(w in text for w in ["فاقد", "بدل", "Lost"]):
+    elif "فاقد" in text or "بدل" in text or "Lost" in text:
         user_state[cid]["status"] = "lost"
     else:
         bot.reply_to(message, "❌ Use the buttons / استخدم الأزرار")
         return
     user_state[cid]["step"] = "hotel"
-    bot.reply_to(message,
-        "╔══════════════════╗\n"
-        "    🏨 *Step 3/5 — Accommodation*\n"
-        "╚══════════════════╝\n\n"
-        "Send accommodation name:\n"
-        "أرسل اسم السكن أو الفندق:\n\n"
-        "*Back / رجوع* to cancel",
-        parse_mode="Markdown", reply_markup=telebot.types.ReplyKeyboardRemove())
+    bot.reply_to(message, "🏨 *Step 3/5 — Accommodation*\nSend name / أرسل اسم السكن:",
+                 parse_mode="Markdown", reply_markup=telebot.types.ReplyKeyboardRemove())
 
 
 @bot.message_handler(func=lambda m: user_state.get(m.chat.id, {}).get("step") == "hotel")
@@ -311,20 +245,13 @@ def get_hotel(message):
     cid = message.chat.id
     hotel = message.text.strip()
     if is_back(hotel):
-        return cancel_state(cid, message)
+        return cancel_state(cid)
     if not hotel:
         bot.reply_to(message, "❌ Send the name / أرسل الاسم")
         return
     user_state[cid]["hotel"] = hotel
     user_state[cid]["step"] = "floor"
-    bot.reply_to(message,
-        "╔══════════════════╗\n"
-        "    📶 *Step 4/5 — Floor*\n"
-        "╚══════════════════╝\n\n"
-        "Send floor number:\n"
-        "أرسل رقم الدور (مثال: 1):\n\n"
-        "*Back / رجوع* to cancel",
-        parse_mode="Markdown")
+    bot.reply_to(message, "📶 *Step 4/5 — Floor*\nSend number / أرسل الدور:", parse_mode="Markdown")
 
 
 @bot.message_handler(func=lambda m: user_state.get(m.chat.id, {}).get("step") == "floor")
@@ -332,20 +259,13 @@ def get_floor(message):
     cid = message.chat.id
     floor = message.text.strip()
     if is_back(floor):
-        return cancel_state(cid, message)
+        return cancel_state(cid)
     if not floor.isdigit():
         bot.reply_to(message, "❌ Enter a number / أدخل رقماً")
         return
     user_state[cid]["floor"] = floor
     user_state[cid]["step"] = "room"
-    bot.reply_to(message,
-        "╔══════════════════╗\n"
-        "    🚪 *Step 5/5 — Room*\n"
-        "╚══════════════════╝\n\n"
-        "Send room number:\n"
-        "أرسل رقم الغرفة (مثال: 165):\n\n"
-        "*Back / رجوع* to cancel",
-        parse_mode="Markdown")
+    bot.reply_to(message, "🚪 *Step 5/5 — Room*\nSend number / أرسل الغرفة:", parse_mode="Markdown")
 
 
 @bot.message_handler(func=lambda m: user_state.get(m.chat.id, {}).get("step") == "room")
@@ -353,7 +273,7 @@ def get_room(message):
     cid = message.chat.id
     room = message.text.strip()
     if is_back(room):
-        return cancel_state(cid, message)
+        return cancel_state(cid)
     if not room:
         bot.reply_to(message, "❌ Enter room / أدخل الغرفة")
         return
@@ -367,19 +287,15 @@ def get_room(message):
 
     s = user_state[cid]
     st = "Not received / لم يستلم" if s["status"] == "not_received" else "Lost / بدل فاقد"
-    txt = (
-        "╔══════════════════╗\n"
-        "    📋 *Confirm — تأكيد*\n"
-        "╚══════════════════╝\n\n"
-        f"🛂 Passport: `{s['passport']}`\n"
-        f"📌 Status: {st}\n"
-        f"🏨 Accommodation: {s['hotel']}\n"
-        f"📶 Floor: {s['floor']}\n"
-        f"🚪 Room: {s['room']}\n"
-        f"👤 Staff: {s['employee']}\n\n"
-        "✅ Send *Confirm / تم* to save\n"
-        "❌ Send *Cancel / إلغاء* or *Back / رجوع*"
-    )
+    txt = (f"📋 *Confirm — تأكيد*\n\n"
+           f"🛂 Passport: `{s['passport']}`\n"
+           f"📌 Status: {st}\n"
+           f"🏨 Accommodation: {s['hotel']}\n"
+           f"📶 Floor: {s['floor']}\n"
+           f"🚪 Room: {s['room']}\n"
+           f"👤 Staff: {s['employee']}\n\n"
+           "✅ Send *Confirm / تم* to save\n"
+           "❌ Send *Cancel / إلغاء* or *Back / رجوع*")
     bot.reply_to(message, txt, parse_mode="Markdown")
 
 
@@ -387,9 +303,9 @@ def get_room(message):
 def confirm_handler(message):
     cid = message.chat.id
     text = message.text.strip()
-    if is_back(text) or text in ["Cancel", "cancel", "إلغاء"]:
-        return cancel_state(cid, message)
-    if text in ["تم", "تأكيد", "Confirm", "confirm", "yes", "نعم"]:
+    if is_back(text) or text in ("Cancel", "cancel", "إلغاء"):
+        return cancel_state(cid)
+    if text in ("تم", "تأكيد", "Confirm", "confirm", "yes", "نعم"):
         s = user_state[cid]
         status_label = "لم يستلم" if s["status"] == "not_received" else "بدل فاقد"
         record = {k: s[k] for k in ("passport", "status", "hotel", "floor", "room", "employee", "date")}
@@ -401,30 +317,33 @@ def confirm_handler(message):
             total = len(store)
         del user_state[cid]
         if ok:
-            bot.reply_to(message,
-                "╔══════════════════╗\n"
-                "    ✅ *Saved! تم الحفظ!*\n"
-                "╚══════════════════╝\n\n"
-                f"Total / الإجمالي: *{total}*\n\n"
-                "1️⃣ New request or /start for menu",
-                parse_mode="Markdown")
+            bot.reply_to(message, f"✅ *Saved! تم الحفظ!*\nTotal: *{total}*", parse_mode="Markdown")
         else:
-            bot.reply_to(message,
-                "⚠️ *Saved locally / حفظ محلياً*\n"
-                "Will sync when Sheets available\n"
-                f"Total: {total}")
+            bot.reply_to(message, f"⚠️ *Saved locally* — Sheets offline\nTotal: {total}")
     else:
         bot.reply_to(message, 'Send *Confirm / تم* or *Cancel / إلغاء*')
         return
     show_main_menu(message.chat.id)
 
 
+def run_health_server():
+    server = http.server.HTTPServer(("0.0.0.0", PORT), http.server.SimpleHTTPRequestHandler)
+    print(f"[HTTP] Health server on port {PORT}")
+    server.serve_forever()
+
+
 if __name__ == "__main__":
     print("Loading data...")
     load_store()
     print(f"Loaded {len(store)} records")
-    bot.remove_webhook()
+    for i in range(5):
+        try:
+            bot.remove_webhook()
+            break
+        except Exception as e:
+            print(f"[WEBHOOK CLEAR] attempt {i+1}: {e}")
+            time.sleep(2)
+    Thread(target=run_health_server, daemon=True).start()
     time.sleep(1)
-    bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    print(f"Webhook set to {WEBHOOK_URL}/webhook")
-    app.run(host="0.0.0.0", port=PORT)
+    print("Nusuk bot started...")
+    bot.polling(none_stop=True, skip_pending=True)
