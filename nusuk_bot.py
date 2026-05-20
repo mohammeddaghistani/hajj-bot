@@ -54,7 +54,9 @@ def sheets_get(action, **params):
 
 def sheets_post(record):
     try:
-        r = requests.post(SHEETS_URL, json={
+        s = requests.Session()
+        s.get(SHEETS_URL, timeout=10)
+        r = s.post(SHEETS_URL, json={
             "passport": record["passport"],
             "status": record["status"],
             "hotel": record["hotel"],
