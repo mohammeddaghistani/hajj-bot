@@ -9,6 +9,7 @@ import tempfile
 from threading import Lock
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1Nzf0kGuhmwiAAcfGSl6xxkRYbtjGuaXujvKcq_oqgWg/export?format=csv"
+MAPS_URL = "https://maps.app.goo.gl/1671T2oFdhV6UuVw5"
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(env_path):
@@ -165,48 +166,18 @@ def process_image_file(message, file_id):
 
         gender = gender_map.get(row["Gender"], row["Gender"])
         building, floor, room = parse_room(row["Room Number"])
-        response = (
-            f"✅ *تم العثور على الحاج/الحاجة*\n\n"
-            f"👤 *الاسم:* {row['Name']}\n"
-            f"⚧ *الجنس:* {gender}\n"
-            f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
-            f"🏢 *المبنى:* {building}\n"
-            f"📌 *الدور:* {floor}\n"
-            f"🚪 *الغرفة:* {room}\n"
-            f"👥 *المجموعة:* {row['Group']}"
-        )
-        bot.send_message(message.chat.id, response, parse_mode="Markdown")
-    except Exception as e:
-        print(f"Image error: {e}")
-        try:
-            bot.send_message(message.chat.id, "❌ حدث خطأ. أرسل الرقم كتابةً.")
-        except:
-            pass
-
-
-@bot.message_handler(content_types=["photo"])
-def handle_photo(message):
-    process_image_file(message, message.photo[-1].file_id)
-
-
-@bot.message_handler(content_types=["document"])
-def handle_document(message):
-    if message.document and message.document.mime_type and message.document.mime_type.startswith("image/"):
-        process_image_file(message, message.document.file_id)
-    else:
-        bot.reply_to(message, "أرسل صورة أو رقم جواز السفر كتابةً.")
-
-
-@bot.message_handler(commands=["start", "help"])
-def send_welcome(message):
-    text = (
-        "🏨 *بوت الاستعلام عن إسكان الحجاج*\n\n"
-        "📱 أرسل رقم *جواز السفر* نصاً\n"
-        "🖼 أو أرسل *صورة* تحتوي على رقم الجواز\n\n"
-        "مثال: `G3386134`\n\n"
-        "🔹 `/stats` — عدد الحجاج المسجلين"
+    response = (
+        f"✅ *تم العثور على الحاج/الحاجة*\n\n"
+        f"👤 *الاسم:* {row['Name']}\n"
+        f"⚧ *الجنس:* {gender}\n"
+        f"🛂 *جواز السفر:* `{row['Passport Number']}\n"
+        f"🏢 *المبنى:* {building}\n"
+        f"📌 *الدور:* {floor}\n"
+        f"🚪 *الغرفة:* {room}\n"
+        f"👥 *المجموعة:* {row['Group']}\n"
+        f"📍 [الموقع على الخريطة]({MAPS_URL})"
     )
-    bot.reply_to(message, text, parse_mode="Markdown")
+    bot.reply_to(message, response, parse_mode="Markdown", disable_web_page_preview=False)
 
 
 @bot.message_handler(commands=["refresh"])
@@ -246,7 +217,8 @@ def lookup_passport(message):
         f"🏢 *المبنى:* {building}\n"
         f"📌 *الدور:* {floor}\n"
         f"🚪 *الغرفة:* {room}\n"
-        f"👥 *المجموعة:* {row['Group']}"
+        f"👥 *المجموعة:* {row['Group']}\n"
+        f"📍 [الموقع على الخريطة]({MAPS_URL})"
     )
     bot.reply_to(message, response, parse_mode="Markdown")
 
