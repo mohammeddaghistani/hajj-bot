@@ -54,22 +54,39 @@ def lookup_passport_number(passport, with_letter):
 
 
 def ocr_image(image_path):
-    if OCR_API_KEY:
-        with open(image_path, "rb") as f:
-            resp = requests.post(
-                "https://api.ocr.space/parse/image",
-                files={"file": f},
-                data={"apikey": OCR_API_KEY, "language": "eng", "OCREngine": "2"},
-                timeout=30,
-            )
+    if not OCR_API_KEY:
+        return ""
+
+    from PIL import Image, ImageEnhance, ImageFilter
+    try:
+        img = Image.open(image_path).convert("L").resize((1200, 900), Image.LANCZOS)
+        img = ImageEnhance.Contrast(img).enhance(2.0).filter(ImageFilter.SHARPEN)
+        img.save(image_path, "JPEG", quality=95)
+    except Exception as e:
+        print(f"Image preprocess error: {e}")
+
+    with open(image_path, "rb") as f:
+        resp = requests.post(
+            "https://api.ocr.space/parse/image",
+            files={"file": f},
+            data={"apikey": OCR_API_KEY, "language": "eng", "OCREngine": "2"},
+            timeout=30,
+        )
+
+    try:
         result = resp.json()
-        if result.get("IsErroredOnProcessing"):
-            print(f"OCR error: {result.get('ErrorMessage', '')}")
-            return ""
-        text = "\n".join(p["ParsedText"] for p in result.get("ParsedResults", []))
-        print(f"OCR result: {text[:200]}")
-        return text
-    return ""
+    except Exception:
+        print(f"OCR API non-JSON response: {resp.text[:300]}")
+        f = io.StringIO(resp.text)
+        return f.read()
+
+    if result.get("IsErroredOnProcessing"):
+        print(f"OCR error: {result.get('ErrorMessage', '')}")
+        return ""
+
+    text = "\n".join(p["ParsedText"] for p in result.get("ParsedResults", []))
+    print(f"OCR result: {text[:300]}")
+    return text
 
 
 def load_data():
