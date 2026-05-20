@@ -28,10 +28,29 @@ lock = Lock()
 last_refresh = 0
 
 PASSPORT_REGEX = re.compile(r"[A-Z]\d{6,9}")
+DIGITS_REGEX = re.compile(r"\d{7,10}")
 
 
 def extract_passport(text):
-    return PASSPORT_REGEX.search(text.upper())
+    upper = text.upper()
+    m = PASSPORT_REGEX.search(upper)
+    if m:
+        return m.group(), True
+    m = DIGITS_REGEX.search(upper)
+    if m:
+        return m.group(), False
+    return None, False
+
+
+def lookup_passport_number(passport, with_letter):
+    row = data.get(passport)
+    if row:
+        return row
+    if not with_letter and passport.isdigit():
+        for p, r in data.items():
+            if p[1:] == passport or p[1:].lstrip("0") == passport.lstrip("0"):
+                return r
+    return None
 
 
 def ocr_image(image_path):
@@ -40,18 +59,17 @@ def ocr_image(image_path):
             resp = requests.post(
                 "https://api.ocr.space/parse/image",
                 files={"file": f},
-                data={"apikey": OCR_API_KEY, "language": "eng"},
+                data={"apikey": OCR_API_KEY, "language": "eng", "OCREngine": "2"},
                 timeout=30,
             )
         result = resp.json()
         if result.get("IsErroredOnProcessing"):
+            print(f"OCR error: {result.get('ErrorMessage', '')}")
             return ""
-        return "\n".join(p["ParsedText"] for p in result.get("ParsedResults", []))
-    try:
-        import pytesseract
-        return pytesseract.image_to_string(image_path, lang="eng")
-    except Exception:
-        return ""
+        text = "\n".join(p["ParsedText"] for p in result.get("ParsedResults", []))
+        print(f"OCR result: {text[:200]}")
+        return text
+    return ""
 
 
 def load_data():
@@ -93,46 +111,56 @@ gender_map = {"male": "ذكر", "female": "أنثى"}
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
-    bot.reply_to(message, "🔄 جاري قراءة الصورة...")
-    file_id = message.photo[-1].file_id
-    file_info = bot.get_file(file_id)
-    downloaded = bot.download_file(file_info.file_path)
-
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        tmp.write(downloaded)
-        tmp_path = tmp.name
-
     try:
-        text = ocr_image(tmp_path)
-    finally:
-        os.unlink(tmp_path)
+        bot.reply_to(message, "🔄 جاري قراءة الصورة...")
+        file_id = message.photo[-1].file_id
+        file_info = bot.get_file(file_id)
+        downloaded = bot.download_file(file_info.file_path)
 
-    match = extract_passport(text)
-    if not match:
-        bot.send_message(message.chat.id, "❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.")
-        return
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(downloaded)
+            tmp_path = tmp.name
 
-    passport = match.group()
-    with lock:
-        row = data.get(passport)
+        try:
+            text = ocr_image(tmp_path)
+        except Exception as e:
+            print(f"OCR error: {e}")
+            bot.send_message(message.chat.id, "❌ حدث خطأ أثناء قراءة الصورة.\nأرسل الرقم كتابةً.")
+            return
+        finally:
+            os.unlink(tmp_path)
 
-    if not row:
-        bot.send_message(message.chat.id, f"❌ لم يتم العثور على رقم الجواز `{passport}`", parse_mode="Markdown")
-        return
+        result, with_letter = extract_passport(text) if text else (None, False)
+        if not result:
+            bot.send_message(message.chat.id, "❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.")
+            return
 
-    gender = gender_map.get(row["Gender"], row["Gender"])
-    building, floor, room = parse_room(row["Room Number"])
-    response = (
-        f"✅ *تم العثور على الحاج/الحاجة*\n\n"
-        f"👤 *الاسم:* {row['Name']}\n"
-        f"⚧ *الجنس:* {gender}\n"
-        f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
-        f"🏢 *المبنى:* {building}\n"
-        f"📌 *الدور:* {floor}\n"
-        f"🚪 *الغرفة:* {room}\n"
-        f"👥 *المجموعة:* {row['Group']}"
-    )
-    bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        with lock:
+            row = lookup_passport_number(result, with_letter)
+
+        if not row:
+            bot.send_message(message.chat.id, f"❌ لم يتم العثور على رقم الجواز `{result}`", parse_mode="Markdown")
+            return
+
+        gender = gender_map.get(row["Gender"], row["Gender"])
+        building, floor, room = parse_room(row["Room Number"])
+        response = (
+            f"✅ *تم العثور على الحاج/الحاجة*\n\n"
+            f"👤 *الاسم:* {row['Name']}\n"
+            f"⚧ *الجنس:* {gender}\n"
+            f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
+            f"🏢 *المبنى:* {building}\n"
+            f"📌 *الدور:* {floor}\n"
+            f"🚪 *الغرفة:* {room}\n"
+            f"👥 *المجموعة:* {row['Group']}"
+        )
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Photo handler error: {e}")
+        try:
+            bot.send_message(message.chat.id, "❌ حدث خطأ غير متوقع. أرسل الرقم كتابةً.")
+        except:
+            pass
 
 
 @bot.message_handler(commands=["start", "help"])
