@@ -450,8 +450,12 @@ def lookup_passport(message):
     cid = message.chat.id
     lang = get_lang(cid)
     passport = message.text.strip().upper()
+    is_digits = passport.isdigit()
     with lock:
-        row = data.get(passport)
+        if is_digits:
+            row = lookup_passport_number(passport, False)
+        else:
+            row = data.get(passport)
 
     if not row:
         bot.reply_to(message, tr("not_found", lang), parse_mode="Markdown")
