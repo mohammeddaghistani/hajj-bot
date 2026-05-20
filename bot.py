@@ -3,7 +3,9 @@ import requests
 import csv
 import io
 import os
+import re
 import time
+import tempfile
 from threading import Lock
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1Nzf0kGuhmwiAAcfGSl6xxkRYbtjGuaXujvKcq_oqgWg/export?format=csv"
@@ -18,11 +20,38 @@ if os.path.exists(env_path):
                 os.environ.setdefault(k.strip(), v.strip())
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+OCR_API_KEY = os.environ.get("OCR_API_KEY", "")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 data = {}
 lock = Lock()
 last_refresh = 0
+
+PASSPORT_REGEX = re.compile(r"[A-Z]\d{6,9}")
+
+
+def extract_passport(text):
+    return PASSPORT_REGEX.search(text.upper())
+
+
+def ocr_image(image_path):
+    if OCR_API_KEY:
+        with open(image_path, "rb") as f:
+            resp = requests.post(
+                "https://api.ocr.space/parse/image",
+                files={"file": f},
+                data={"apikey": OCR_API_KEY, "language": "eng"},
+                timeout=30,
+            )
+        result = resp.json()
+        if result.get("IsErroredOnProcessing"):
+            return ""
+        return "\n".join(p["ParsedText"] for p in result.get("ParsedResults", []))
+    try:
+        import pytesseract
+        return pytesseract.image_to_string(image_path, lang="eng")
+    except Exception:
+        return ""
 
 
 def load_data():
@@ -62,11 +91,56 @@ def parse_room(room_str):
 gender_map = {"male": "ذكر", "female": "أنثى"}
 
 
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    msg = bot.reply_to(message, "🔄 جاري قراءة الصورة...")
+    file_id = message.photo[-1].file_id
+    file_info = bot.get_file(file_id)
+    downloaded = bot.download_file(file_info.file_path)
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp.write(downloaded)
+        tmp_path = tmp.name
+
+    try:
+        text = ocr_image(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+
+    match = extract_passport(text)
+    if not match:
+        bot.edit_message_text("❌ لم أتمكن من قراءة رقم جواز السفر من الصورة.\nأرسل الرقم كتابةً بدلاً من ذلك.", chat_id=msg.chat.id, message_id=msg.message_id)
+        return
+
+    passport = match.group()
+    with lock:
+        row = data.get(passport)
+
+    if not row:
+        bot.edit_message_text(f"❌ لم يتم العثور على رقم الجواز `{passport}`", chat_id=msg.chat.id, message_id=msg.message_id, parse_mode="Markdown")
+        return
+
+    gender = gender_map.get(row["Gender"], row["Gender"])
+    building, floor, room = parse_room(row["Room Number"])
+    response = (
+        f"✅ *تم العثور على الحاج/الحاجة*\n\n"
+        f"👤 *الاسم:* {row['Name']}\n"
+        f"⚧ *الجنس:* {gender}\n"
+        f"🛂 *جواز السفر:* `{row['Passport Number']}`\n"
+        f"🏢 *المبنى:* {building}\n"
+        f"📌 *الدور:* {floor}\n"
+        f"🚪 *الغرفة:* {room}\n"
+        f"👥 *المجموعة:* {row['Group']}"
+    )
+    bot.edit_message_text(response, chat_id=msg.chat.id, message_id=msg.message_id, parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
     text = (
         "🏨 *بوت الاستعلام عن إسكان الحجاج*\n\n"
-        "أرسل رقم *جواز السفر* للحصول على معلومات الغرفة.\n\n"
+        "📱 أرسل رقم *جواز السفر* نصاً\n"
+        "🖼 أو أرسل *صورة* تحتوي على رقم الجواز\n\n"
         "مثال: `G3386134`\n\n"
         "🔹 `/stats` — عدد الحجاج المسجلين"
     )
