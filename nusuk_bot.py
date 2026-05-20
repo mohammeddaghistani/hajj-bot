@@ -346,4 +346,9 @@ if __name__ == "__main__":
     Thread(target=run_health_server, daemon=True).start()
     time.sleep(1)
     print("Nusuk bot started...")
-    bot.polling(none_stop=True, skip_pending=True)
+    while True:
+        try:
+            bot.polling(none_stop=True, timeout=30)
+        except Exception as e:
+            print(f"[POLLING ERROR] {e}, retrying in 5s...")
+            time.sleep(5)
