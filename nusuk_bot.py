@@ -366,19 +366,14 @@ def run_health_server():
 if __name__ == "__main__":
     print("Connecting to Google Sheets...")
     init_sheet()
-    for i in range(5):
-        try:
-            bot.remove_webhook()
-            break
-        except Exception as e:
-            print(f"[WEBHOOK] attempt {i+1}: {e}")
-            time.sleep(2)
     Thread(target=run_health_server, daemon=True).start()
     time.sleep(1)
     print("Nusuk bot started...")
     while True:
         try:
+            bot.remove_webhook()
+            time.sleep(2)
             bot.polling(none_stop=True, timeout=30)
         except Exception as e:
-            print(f"[POLLING] {e}, retrying...")
+            print(f"[POLLING] {e}, retrying in 5s...")
             time.sleep(5)
