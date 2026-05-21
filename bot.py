@@ -207,7 +207,7 @@ def cmd_stats(m=None):
 
 room_bot = None
 ROOM_CSV_URL = os.environ.get("ROOM_CSV_URL",
-    "https://docs.google.com/spreadsheets/d/1Nzf0kGuhmwiAAcfGSl6xxkRYbtjGuaXujvKcq_oqgWg/export?format=csv")
+    "https://docs.google.com/spreadsheets/d/1s1LKapsD1Q_1LPnkJYsnoIatsy8bBi1WyBXp7AU-_Ek/export?format=csv")
 
 if ROOM_TOKEN:
     try:
