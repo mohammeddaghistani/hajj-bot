@@ -466,17 +466,20 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Nusuk Bot v6.1 — Running")
+        self.wfile.write(b"Nusuk Bot v6.1 - Running")
 
     def do_POST(self):
-        if self.path == "/webhook":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = self.rfile.read(length)
-                update = telebot.types.Update.de_json(json.loads(body))
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = self.rfile.read(length)
+            update = telebot.types.Update.de_json(json.loads(body))
+            if self.path == "/room_webhook":
+                if room_bot:
+                    room_bot.process_new_updates([update])
+            else:
                 bot.process_new_updates([update])
-            except Exception as e:
-                log.error("Webhook error: %s", e)
+        except Exception as e:
+            log.error("Webhook error: %s", e)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
@@ -486,28 +489,103 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
 
 
 # ─────────────────────────────────────────────────────────────
+# ROOM BOT  —  initialized if ROOM_BOT_TOKEN is set
+# ─────────────────────────────────────────────────────────────
+
+room_bot = None
+ROOM_BOT_TOKEN = os.environ.get("ROOM_BOT_TOKEN", "")
+ROOM_WEBHOOK_URL = f"{RENDER_URL}/room_webhook" if RENDER_URL else ""
+
+if ROOM_BOT_TOKEN:
+    try:
+        room_bot = telebot.TeleBot(ROOM_BOT_TOKEN)
+        D = "▬" * 30
+
+        @room_bot.message_handler(commands=["start", "help"])
+        def _rs(m):
+            room_bot.send_message(m.chat.id,
+                f"🕋  HAJJ ROOM  🕋\n{D}\n\n"
+                f"*نظام الاستعلام عن الغرف*\n_Room Inquiry System_\n\n{D}\n\n"
+                f"🛂  أرسل رقم جواز السفر\n_Send passport number_\n\n"
+                f"مثال: `G3386134`\n\n{D}",
+                parse_mode="Markdown")
+
+        _ws_cache = [None]
+        def _get_ws():
+            if _ws_cache[0]: return _ws_cache[0]
+            k = json.loads(GOOGLE_SHEETS_KEY)
+            if not k: return None
+            c = Credentials.from_service_account_info(k, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            s = gspread.authorize(c).open_by_key(SHEET_ID)
+            try: _ws_cache[0] = s.worksheet("Rooms")
+            except: _ws_cache[0] = s.add_worksheet("Rooms", 1000, 4)
+            return _ws_cache[0]
+
+        @room_bot.message_handler(func=lambda m: m.text and not m.text.startswith("/"))
+        def _rl(m):
+            p = m.text.strip().upper()
+            if not re.match(r"^[A-Z]\d{6,9}$", p):
+                room_bot.reply_to(m, "❌  جواز غير صحيح  ·  _Invalid passport_", parse_mode="Markdown"); return
+            try:
+                ws = _get_ws()
+                if ws:
+                    for r in ws.get_all_values()[1:]:
+                        if len(r) >= 4 and r[0].strip().upper() == p:
+                            room_bot.reply_to(m,
+                                f"🕋  HAJJ ROOM  🕋\n{D}\n\n"
+                                f"✅  *تم العثور*\n{D}\n\n"
+                                f"🆔  `{p}`\n🏨  {r[1]}\n📶  {r[2]}\n🚪  {r[3]}\n\n{D}\n🙏  حج مبرور",
+                                parse_mode="Markdown")
+                            return
+                room_bot.reply_to(m,
+                    f"🕋  HAJJ ROOM  🕋\n{D}\n\n❌  *غير مسجل*\n{D}\n\n🆔  `{p}`\nغير موجود.\n{D}",
+                    parse_mode="Markdown")
+            except Exception as e:
+                room_bot.reply_to(m, "⚠️  خطأ في البحث  ·  _Search error_", parse_mode="Markdown")
+                log.warning("Room lookup error: %s", e)
+
+        log.info("Room bot ready")
+    except Exception as e:
+        log.warning("Room bot init failed: %s", e)
+        room_bot = None
+
+
+def _keep_alive():
+    url = f"{RENDER_URL}/" if RENDER_URL else None
+    if not url: return
+    import threading, urllib.request
+    def _p():
+        while True:
+            time.sleep(600)
+            try: urllib.request.urlopen(url, timeout=10)
+            except: pass
+    t = threading.Thread(target=_p, daemon=True)
+    t.start()
+
+
+# ─────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    time.sleep(0.5)
+    try: bot.remove_webhook()
+    except: pass
+    if room_bot:
+        try: room_bot.remove_webhook()
+        except: pass
+    time.sleep(1)
 
     if WEBHOOK_URL:
-        for attempt in range(3):
-            try:
-                bot.set_webhook(url=WEBHOOK_URL)
-                log.info("Webhook set → %s", WEBHOOK_URL)
-                break
-            except Exception as e:
-                log.warning("Webhook attempt %d: %s", attempt + 1, e)
-                time.sleep(2)
-    else:
-        log.warning("RENDER_EXTERNAL_URL not set — webhook disabled")
+        for a in range(3):
+            try: bot.set_webhook(url=WEBHOOK_URL); log.info("Nusuk webhook set"); break
+            except Exception as e: log.warning("Webhook attempt %d: %s", a+1, e); time.sleep(2)
+    if ROOM_WEBHOOK_URL and room_bot:
+        for a in range(3):
+            try: room_bot.set_webhook(url=ROOM_WEBHOOK_URL); log.info("Room webhook set"); break
+            except Exception as e: log.warning("Room webhook attempt %d: %s", a+1, e); time.sleep(2)
 
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("0.0.0.0", PORT), WebhookHandler)
-    log.info("╔═══════════════════════════════════════════╗")
-    log.info("║  NUSUK BOT v6.1  —  listening :%d     ║", PORT)
-    log.info("╚═══════════════════════════════════════════╝")
+    _keep_alive()
+    log.info("Hajj Bots - listening :%d", PORT)
     server.serve_forever()
