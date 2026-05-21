@@ -14,10 +14,13 @@ import time
 import logging
 import http.server
 import socketserver
+import threading
+import urllib.request
 from datetime import datetime
 from typing import Optional
 from google.oauth2.service_account import Credentials
 import gspread
+import room_bot
 
 # ─────────────────────────────────────────────────────────────
 # ENVIRONMENT
@@ -30,6 +33,12 @@ PORT      = int(os.environ.get("PORT", 8080))
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 GOOGLE_SHEETS_KEY = os.environ.get("GOOGLE_SHEETS_KEY", "{}")
 WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else ""
+ROOM_WEBHOOK_URL = f"{RENDER_URL}/room_webhook" if RENDER_URL else ""
+
+# Room bot instance (lazy — created only if token is set)
+room_bot_instance = telebot.TeleBot(room_bot.ROOM_BOT_TOKEN) if room_bot.ROOM_BOT_TOKEN else None
+if room_bot_instance:
+    room_bot.register(room_bot_instance)
 
 CANCEL_WORDS = {"الغاء", "إلغاء", "cancel", "رجوع", "back", "✕", "❌"}
 
@@ -466,17 +475,19 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Nusuk Bot v6.1 — Running")
+        self.wfile.write(b"Hajj Bots - Running")
 
     def do_POST(self):
-        if self.path == "/webhook":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = self.rfile.read(length)
-                update = telebot.types.Update.de_json(json.loads(body))
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = self.rfile.read(length)
+            update = telebot.types.Update.de_json(json.loads(body))
+            if self.path == "/room_webhook" and room_bot_instance:
+                room_bot_instance.process_new_updates([update])
+            else:
                 bot.process_new_updates([update])
-            except Exception as e:
-                log.error("Webhook error: %s", e)
+        except Exception as e:
+            log.error("Webhook error: %s", e)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
@@ -485,29 +496,44 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def start_keep_alive():
+    url = f"{RENDER_URL}/" if RENDER_URL else None
+    if not url: return
+    def _ping():
+        while True:
+            time.sleep(600)
+            try:
+                urllib.request.urlopen(url, timeout=10)
+            except: pass
+    t = threading.Thread(target=_ping, daemon=True)
+    t.start()
+
+
 # ─────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    time.sleep(0.5)
+    for _ in range(3):
+        try: bot.remove_webhook(); break
+        except: time.sleep(2)
+    if room_bot_instance:
+        for _ in range(3):
+            try: room_bot_instance.remove_webhook(); break
+            except: time.sleep(2)
+    time.sleep(1)
 
     if WEBHOOK_URL:
         for attempt in range(3):
-            try:
-                bot.set_webhook(url=WEBHOOK_URL)
-                log.info("Webhook set → %s", WEBHOOK_URL)
-                break
-            except Exception as e:
-                log.warning("Webhook attempt %d: %s", attempt + 1, e)
-                time.sleep(2)
-    else:
-        log.warning("RENDER_EXTERNAL_URL not set — webhook disabled")
+            try: bot.set_webhook(url=WEBHOOK_URL); log.info("Nusuk webhook set"); break
+            except Exception as e: log.warning("Nusuk webhook attempt %d: %s", attempt+1, e); time.sleep(2)
+    if ROOM_WEBHOOK_URL and room_bot_instance:
+        for attempt in range(3):
+            try: room_bot_instance.set_webhook(url=ROOM_WEBHOOK_URL); log.info("Room webhook set"); break
+            except Exception as e: log.warning("Room webhook attempt %d: %s", attempt+1, e); time.sleep(2)
 
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("0.0.0.0", PORT), WebhookHandler)
-    log.info("╔═══════════════════════════════════════════╗")
-    log.info("║  NUSUK BOT v6.1  —  listening :%d     ║", PORT)
-    log.info("╚═══════════════════════════════════════════╝")
+    start_keep_alive()
+    log.info("Hajj Bots - listening :%d", PORT)
     server.serve_forever()
