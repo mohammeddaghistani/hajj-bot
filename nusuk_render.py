@@ -32,6 +32,9 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 GOOGLE_SHEETS_KEY = os.environ.get("GOOGLE_SHEETS_KEY", "{}")
 WEBHOOK_URL = f"{RENDER_URL}/webhook" if RENDER_URL else ""
 
+_avail = [k for k in ("BOT_TOKEN","NUSUK_BOT_TOKEN","ROOM_BOT_TOKEN","SHEET_ID","RENDER_EXTERNAL_URL") if os.environ.get(k)]
+print(f"[DIAG] Available env var names: {_avail}", flush=True)
+
 CANCEL_WORDS = {"الغاء", "إلغاء", "cancel", "رجوع", "back", "✕", "❌"}
 
 # ─────────────────────────────────────────────────────────────
