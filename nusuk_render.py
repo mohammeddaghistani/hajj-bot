@@ -14,6 +14,7 @@ import time
 import logging
 import http.server
 import socketserver
+import sys
 from datetime import datetime
 from typing import Optional
 from google.oauth2.service_account import Credentials
@@ -23,7 +24,7 @@ import gspread
 # ENVIRONMENT
 # ─────────────────────────────────────────────────────────────
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "") or os.environ.get("NUSUK_BOT_TOKEN", "")
 DB_PATH   = os.path.join(os.path.dirname(__file__), "nusuk.db")
 SHEET_ID  = os.environ.get("SHEET_ID", "1ct8MGpZi_3qE4EIfftmje9w_3HOX4HR33ffl6YRB054")
 PORT      = int(os.environ.get("PORT", 8080))
@@ -205,7 +206,12 @@ def session_step(chat_id: int) -> Optional[str]:
 # BOT INSTANCE
 # ─────────────────────────────────────────────────────────────
 
-bot   = telebot.TeleBot(BOT_TOKEN)
+try:
+    bot = telebot.TeleBot(BOT_TOKEN)
+except Exception as e:
+    log.error("Failed to create bot: %s", e)
+    print(f"[FATAL] Bot init failed: {e}", file=sys.stderr)
+    sys.exit(1)
 sheet = init_sheets()
 init_db()
 
