@@ -206,6 +206,9 @@ def cmd_stats(m=None):
 # ─────────── ROOM BOT ───────────
 
 room_bot = None
+ROOM_CSV_URL = os.environ.get("ROOM_CSV_URL",
+    "https://docs.google.com/spreadsheets/d/1Nzf0kGuhmwiAAcfGSl6xxkRYbtjGuaXujvKcq_oqgWg/export?format=csv")
+
 if ROOM_TOKEN:
     try:
         room_bot = telebot.TeleBot(ROOM_TOKEN)
@@ -218,30 +221,59 @@ if ROOM_TOKEN:
                 f"🛂  أرسل رقم جواز السفر\nمثال: `G3386134`\n\n{DIV}",
                 parse_mode="Markdown")
 
-        _ws = [None]
-        def _get_ws():
-            if _ws[0]: return _ws[0]
-            k = json.loads(GS_KEY)
-            if not k: return None
-            c = Credentials.from_service_account_info(k, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-            s = gspread.authorize(c).open_by_key(SHEET_ID)
-            try: _ws[0] = s.worksheet("Rooms")
-            except: _ws[0] = s.add_worksheet("Rooms", 1000, 4)
-            return _ws[0]
+        _data_cache = [None]
+        def _load_data():
+            if _data_cache[0]: return _data_cache[0]
+            try:
+                resp = urllib.request.urlopen(ROOM_CSV_URL, timeout=15)
+                text = resp.read().decode("utf-8")
+                rows = []
+                for line in text.splitlines()[1:]:
+                    parts = line.split(",")
+                    if len(parts) >= 5:
+                        pid = parts[3].strip().upper()
+                        rn = parts[4].strip()
+                        parts_rn = rn.split("_")
+                        if len(parts_rn) >= 5:
+                            hotel = parts_rn[0]
+                            floor = parts_rn[2]
+                            room = parts_rn[4]
+                        else:
+                            hotel, floor, room = rn, "", ""
+                        rows.append((pid, hotel, floor, room))
+                _data_cache[0] = rows
+                log.info("Room data loaded: %d records", len(rows))
+            except Exception as e:
+                log.warning("Room data load: %s", e)
+                _data_cache[0] = []
+            return _data_cache[0]
+
+        @room_bot.message_handler(commands=["refresh"])
+        def rr(m):
+            _data_cache[0] = None
+            d = _load_data()
+            room_bot.reply_to(m, f"✅ تم التحديث — {len(d)} حاج")
 
         @room_bot.message_handler(func=lambda m: m.text and not m.text.startswith("/"))
         def rl(m):
             p = m.text.strip().upper()
             if not re.match(r"^[A-Z]\d{6,9}$", p):
-                room_bot.reply_to(m, "❌ جواز غير صحيح", parse_mode="Markdown"); return
+                room_bot.reply_to(m, "❌ جواز غير صحيح\n_Passport format: letter + 6-9 digits_", parse_mode="Markdown"); return
             try:
-                ws = _get_ws()
-                if ws:
-                    for r in ws.get_all_values()[1:]:
-                        if len(r)>=4 and r[0].strip().upper()==p:
-                            room_bot.reply_to(m, f"🕋  HAJJ ROOM\n{DIV}\n✅ *تم العثور*\n{DIV}\n🆔 `{p}`\n🏨 {r[1]}\n📶 {r[2]}\n🚪 {r[3]}\n{DIV}\n🙏 حج مبرور", parse_mode="Markdown")
-                            return
-                room_bot.reply_to(m, f"🕋  HAJJ ROOM\n{DIV}\n❌ *غير مسجل*\n{DIV}\n🆔 `{p}`\nغير موجود.\n{DIV}", parse_mode="Markdown")
+                rows = _load_data()
+                for pid, hotel, floor, room in rows:
+                    if pid == p:
+                        room_bot.reply_to(m,
+                            f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
+                            f"✅ *تم العثور*\n{DIV}\n"
+                            f"🆔  `{p}`\n🏨  {hotel}\n📶  {floor}\n🚪  {room}\n{DIV}\n🙏  حج مبرور",
+                            parse_mode="Markdown")
+                        return
+                room_bot.reply_to(m,
+                    f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
+                    f"❌ *غير مسجل*\n{DIV}\n"
+                    f"🆔  `{p}`\nغير موجود.\n{DIV}",
+                    parse_mode="Markdown")
             except Exception as e:
                 room_bot.reply_to(m, "⚠️ خطأ في البحث", parse_mode="Markdown")
                 log.warning("Room lookup: %s", e)
