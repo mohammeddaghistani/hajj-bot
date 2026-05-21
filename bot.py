@@ -235,8 +235,9 @@ if ROOM_TOKEN:
         def rs(m):
             room_bot.send_message(m.chat.id,
                 f"🕋  HAJJ ROOM  🕋\n{DIV}\n\n"
-                f"*نظام الاستعلام عن الغرف*\n\n{DIV}\n\n"
-                f"🛂  أرسل رقم جواز السفر\nمثال: `G3386134`\n\n{DIV}",
+                f"🏨 *نظام الاستعلام عن الغرف*\n_Room Inquiry System_\n\n{DIV}\n\n"
+                f"🛂  أرسل رقم جواز السفر\n_Send passport number_\n\n"
+                f"مثال / Example: `G3386134`\n\n{DIV}",
                 parse_mode="Markdown")
 
         _data_cache = [None]
@@ -270,20 +271,20 @@ if ROOM_TOKEN:
         def rr(m):
             _data_cache[0] = None
             d = _load_data()
-            room_bot.reply_to(m, f"✅ تم التحديث — {len(d)} حاج")
+            room_bot.reply_to(m, f"✅ تم التحديث  ·  _Updated_ — {len(d)} حاج / pilgrims")
 
         @room_bot.message_handler(func=lambda m: m.text and not m.text.startswith("/"))
         def rl(m):
             p = m.text.strip().upper()
             if not re.match(r"^[A-Z]\d{6,9}$", p):
-                room_bot.reply_to(m, "❌ جواز غير صحيح\n_Passport format: letter + 6-9 digits_", parse_mode="Markdown"); return
+                room_bot.reply_to(m, "❌ جواز غير صحيح  ·  _Invalid passport_\n`G3386134`", parse_mode="Markdown"); return
             try:
                 rows = _load_data()
                 for pid, hotel, floor, room in rows:
                     if pid == p:
                         map_url = BUILDING_MAPS.get(hotel, "")
                         reply = (f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
-                                 f"✅ *تم العثور*\n{DIV}\n"
+                                 f"✅ *تم العثور*  ·  _Found_\n{DIV}\n"
                                  f"🆔  `{p}`\n🏨  {hotel}\n📶  {floor}\n🚪  {room}\n{DIV}\n🙏  حج مبرور")
                         if map_url:
                             reply += f"\n📍 [الموقع على الخريطة]({map_url})"
@@ -291,11 +292,11 @@ if ROOM_TOKEN:
                         return
                 room_bot.reply_to(m,
                     f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
-                    f"❌ *غير مسجل*\n{DIV}\n"
-                    f"🆔  `{p}`\nغير موجود.\n{DIV}",
+                    f"❌ *غير مسجل*  ·  _Not found_\n{DIV}\n"
+                    f"🆔  `{p}`\nغير موجود  ·  _Not registered_\n{DIV}",
                     parse_mode="Markdown")
             except Exception as e:
-                room_bot.reply_to(m, "⚠️ خطأ في البحث", parse_mode="Markdown")
+                room_bot.reply_to(m, "⚠️ خطأ في البحث  ·  _Search error_", parse_mode="Markdown")
                 log.warning("Room lookup: %s", e)
 
         log.info("Room bot ready")
