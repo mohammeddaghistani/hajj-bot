@@ -152,6 +152,23 @@ def confirm(m):
             c.commit(); c.close()
         except Exception as e:
             log.warning("DB insert: %s", e)
+        # Forward to Telegram chat (if LOG_CHAT_ID set)
+        try:
+            lcid = os.environ.get("LOG_CHAT_ID", "")
+            if lcid:
+                st = "لم يستلم" if s["status"]=="not_received" else "بدل فاقد"
+                nusuk_bot.send_message(int(lcid),
+                    f"📥 *طلب جديد*\n{DIV}\n"
+                    f"🛂 جواز: `{s['passport']}`\n"
+                    f"📌 حالة: {st}\n"
+                    f"🏨 سكن: {s['hotel']}\n"
+                    f"📶 دور: {s['floor']}\n"
+                    f"🚪 غرفة: {s['room']}\n"
+                    f"👤 موظف: {s['employee']}\n"
+                    f"📅 تاريخ: {s['date']}\n{DIV}",
+                    parse_mode="Markdown")
+        except Exception as e:
+            log.warning("Log chat: %s", e)
         try:
             k = json.loads(GS_KEY)
             if k:
