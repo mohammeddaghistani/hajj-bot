@@ -1,6 +1,7 @@
 .env
 __pycache__/
 *.pyc
-bot.log
+*.log
 *.csv
+*.db
 nusuk_requests.json
