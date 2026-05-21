@@ -203,6 +203,24 @@ def cmd_stats(m=None):
     for h,n in sorted(hotels.items(), key=lambda x:-x[1]): lines.append(f"  {h}: `{n}`")
     nusuk_bot.reply_to(m, "\n".join(lines), parse_mode="Markdown")
 
+# ─────────── BUILDING MAPS ───────────
+
+BUILDING_MAPS = {
+    "ALRAIS2": "https://maps.app.goo.gl/1671T2oFdhV6UuVw5",
+    "AJWAD": "https://maps.app.goo.gl/SKAWGzcLmcEqfbWcA",
+    "ALRAIS3": "https://maps.app.goo.gl/kXt4cFLLHAs4nDBz8",
+    "DURRA": "https://maps.app.goo.gl/T1P75ecrCnh8jrN4A",
+    "MAN.SITTEEN": "https://maps.app.goo.gl/H6AKvdriSzFxv1BA8",
+    "NUZHA1": "https://maps.app.goo.gl/jfD6UMQFmo9BhRz57",
+    "NUZHA2": "https://maps.app.goo.gl/KMGfKadewiNL5vBSA",
+    "RAIES1": "https://maps.app.goo.gl/qkH1GQuTm8C8nAGG7",
+    "THARAWAT2": "https://maps.app.goo.gl/wVhu49YPr2DLALy38",
+    "THARAWAT3": "https://maps.app.goo.gl/QWnWixiv6nLA7E2R7",
+    "THARAWAT4": "https://maps.app.goo.gl/Qqcw8K5PQDoYQ3PT9",
+    "THARAWAT5": "https://maps.app.goo.gl/bEd7nUrjpU4PgwuaA",
+    "THARAWAT6": "https://maps.app.goo.gl/bEd7nUrjpU4PgwuaA",
+}
+
 # ─────────── ROOM BOT ───────────
 
 room_bot = None
@@ -263,11 +281,13 @@ if ROOM_TOKEN:
                 rows = _load_data()
                 for pid, hotel, floor, room in rows:
                     if pid == p:
-                        room_bot.reply_to(m,
-                            f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
-                            f"✅ *تم العثور*\n{DIV}\n"
-                            f"🆔  `{p}`\n🏨  {hotel}\n📶  {floor}\n🚪  {room}\n{DIV}\n🙏  حج مبرور",
-                            parse_mode="Markdown")
+                        map_url = BUILDING_MAPS.get(hotel, "")
+                        reply = (f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
+                                 f"✅ *تم العثور*\n{DIV}\n"
+                                 f"🆔  `{p}`\n🏨  {hotel}\n📶  {floor}\n🚪  {room}\n{DIV}\n🙏  حج مبرور")
+                        if map_url:
+                            reply += f"\n📍 [الموقع على الخريطة]({map_url})"
+                        room_bot.reply_to(m, reply, parse_mode="Markdown", disable_web_page_preview=False)
                         return
                 room_bot.reply_to(m,
                     f"🕋  HAJJ ROOM  🕋\n{DIV}\n"
