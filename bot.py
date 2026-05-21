@@ -321,14 +321,17 @@ if __name__ == "__main__":
             try: room_bot.set_webhook(url=room_wh); log.info("Room webhook set"); break
             except Exception as e: log.warning("Room webhook attempt %d: %s", a+1, e); time.sleep(2)
 
-    # Keep-alive
+    # Keep-alive (every 10 min to prevent Render free-tier spin-down)
     if RENDER_URL:
         def _p():
             while True:
                 time.sleep(600)
-                try: urllib.request.urlopen(f"{RENDER_URL}/", timeout=10)
-                except: pass
+                try:
+                    urllib.request.urlopen(f"{RENDER_URL}/", timeout=10)
+                except:
+                    pass
         threading.Thread(target=_p, daemon=True).start()
+        log.info("Keep-alive started → every 10 min")
 
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
