@@ -234,12 +234,12 @@ if ROOM_TOKEN:
         @room_bot.message_handler(commands=["start","help"])
         def rs(m):
             room_bot.send_message(m.chat.id,
-                f"🕋 *HAJJ ROOM*  —  *نظام الغرف*\n\n"
-                f"🏨 *نظام الاستعلام عن الغرف*\n"
-                f"_Room Inquiry System_\n\n"
-                f"🛂 أرسل رقم جواز السفر\n"
-                f"_Send passport number_\n\n"
-                f"مثال: `G3386134`",
+                f"🕋 *HAJJ ROOM*  |  *نظام الغرف*\n\n"
+                f"🏨 *Room Inquiry System*\n"
+                f"_نظام الاستعلام عن الغرف_\n\n"
+                f"📌 *How to use | طريقة الاستخدام:*\n"
+                f"Send your passport number | أرسل رقم جواز السفر\n\n"
+                f"مثال | Example: `G3386134`",
                 parse_mode="Markdown")
 
         _data_cache = [None]
@@ -285,24 +285,25 @@ if ROOM_TOKEN:
                 for pid, hotel, floor, room in rows:
                     if pid == p:
                         map_url = BUILDING_MAPS.get(hotel, "")
-                        reply = (f"🕋 *HAJJ ROOM*  —  *نظام الغرف*\n\n"
-                                 f"✅ *تم العثور / Found*\n\n"
-                                 f"🆔 `{p}`\n"
-                                 f"🏨 {hotel}\n"
-                                 f"📶 Floor {floor} — الدور {floor}\n"
-                                 f"🚪 Room {room} — الغرفة {room}")
+                        reply = (f"🕋 *HAJJ ROOM*  |  *نظام الغرف*\n\n"
+                                 f"✅ *Found*  |  *تم العثور*\n\n"
+                                 f"🛂 Passport | جواز السفر: `{p}`\n"
+                                 f"🏨 Building | المبنى: {hotel}\n"
+                                 f"📶 Floor | الدور: {floor}\n"
+                                 f"🚪 Room | الغرفة: {room}")
                         if map_url:
-                            reply += f"\n📍 [{hotel}]({map_url})"
-                        reply += f"\n\n🙏 حج مبرور"
+                            reply += f"\n📍 [📍 Location | الموقع]({map_url})"
+                        reply += f"\n\n🙏 Hajj Mabrur | حج مبرور"
                         room_bot.reply_to(m, reply, parse_mode="Markdown", disable_web_page_preview=False)
                         return
                 room_bot.reply_to(m,
-                    f"🕋 *HAJJ ROOM*  —  *نظام الغرف*\n\n"
-                    f"❌ *غير مسجل / Not Found*\n\n"
-                    f"🆔 `{p}`\nغير موجود · _Not registered_",
+                    f"🕋 *HAJJ ROOM*  |  *نظام الغرف*\n\n"
+                    f"❌ *Not Found*  |  *غير مسجل*\n\n"
+                    f"🛂 Passport | جواز السفر: `{p}`\n"
+                    f"Not registered | غير مسجل",
                     parse_mode="Markdown")
             except Exception as e:
-                room_bot.reply_to(m, "⚠️ خطأ في البحث  ·  _Search error_\nأعد المحاولة  ·  _Try again_", parse_mode="Markdown")
+                room_bot.reply_to(m, "⚠️ *Search Error*  |  *خطأ في البحث*\nTry again | أعد المحاولة", parse_mode="Markdown")
                 log.warning("Room lookup: %s", e)
 
         log.info("Room bot ready")
