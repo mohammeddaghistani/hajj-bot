@@ -455,12 +455,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 # ─────────── MAIN ───────────
 
+def _del_webhooks():
+    for bot in [nusuk_bot, room_bot]:
+        if not bot: continue
+        for a in range(3):
+            try:
+                bot.remove_webhook(drop_pending_updates=True)
+                log.info("Webhook removed for %s", bot.token[:8])
+                break
+            except Exception as e:
+                log.warning("remove_webhook attempt %d: %s", a+1, e)
+                time.sleep(1)
+
 if __name__ == "__main__":
-    try: nusuk_bot.remove_webhook()
-    except: pass
-    if room_bot:
-        try: room_bot.remove_webhook()
-        except: pass
+    _del_webhooks()
 
     if RENDER_URL:
         for a in range(3):
