@@ -5,8 +5,6 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 import gspread
 
-# ─────────── LOCAL .env ───────────
-
 _env = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env):
     with open(_env) as f:
@@ -16,8 +14,6 @@ if os.path.exists(_env):
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
 
-# ─────────── ENVIRONMENT ───────────
-
 NUSUK_TOKEN = os.environ.get("NUSUK_BOT_TOKEN") or os.environ.get("BOT_TOKEN", "")
 ROOM_TOKEN  = os.environ.get("ROOM_BOT_TOKEN") or os.environ.get("BOT_TOKEN", "")
 SHEET_ID    = os.environ.get("SHEET_ID", "1ct8MGpZi_3qE4EIfftmje9w_3HOX4HR33ffl6YRB054")
@@ -26,73 +22,78 @@ RENDER_URL  = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 GS_KEY      = os.environ.get("GOOGLE_SHEETS_KEY", "{}")
 DB_PATH     = os.path.join(os.path.dirname(__file__), "nusuk.db")
 
-# ─────────── LOGGING ───────────
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  [%(levelname)s]  %(message)s")
 log = logging.getLogger("bot")
 
-# ─────────── NUSUK BOT ───────────
-
 if NUSUK_TOKEN:
-    try:
-        nusuk_bot = telebot.TeleBot(NUSUK_TOKEN)
-    except Exception as e:
-        log.error("Nusuk bot init failed: %s", e); sys.exit(1)
-else:
-    log.error("NUSUK_BOT_TOKEN not set"); sys.exit(1)
-
-# ─────────── DATABASE ───────────
+    try: nusuk_bot = telebot.TeleBot(NUSUK_TOKEN)
+    except Exception as e: log.error("Nusuk bot init failed: %s", e); sys.exit(1)
+else: log.error("NUSUK_BOT_TOKEN not set"); sys.exit(1)
 
 try:
     c = sqlite3.connect(DB_PATH)
     c.execute("CREATE TABLE IF NOT EXISTS requests (id INTEGER PRIMARY KEY AUTOINCREMENT, passport TEXT NOT NULL, status TEXT, hotel TEXT, floor TEXT, room TEXT, employee TEXT, date TEXT)")
-    c.close()
-    log.info("DB ready")
-except Exception as e:
-    log.warning("DB init: %s", e)
-
-# ─────────── NUSUK HANDLERS ───────────
+    c.close(); log.info("DB ready")
+except Exception as e: log.warning("DB init: %s", e)
 
 DIV = "▬" * 30
 
-def main_menu(chat_id):
+# ─────────── HELPERS ───────────
+
+def _st(s): return "لم يستلم" if s=="not_received" else "بدل فاقد"
+def _db(sql, params=(), fetch=None):
+    c = sqlite3.connect(DB_PATH)
+    r = c.execute(sql, params)
+    if fetch=="one": r = r.fetchone()
+    elif fetch=="all": r = r.fetchall()
+    else: r = None
+    c.commit(); c.close()
+    return r
+
+# ─────────── MAIN MENU ───────────
+
+def main_menu(cid):
     mk = telebot.types.InlineKeyboardMarkup(row_width=2)
     mk.add(
-        telebot.types.InlineKeyboardButton("1️⃣ طلب جديد", callback_data="new"),
-        telebot.types.InlineKeyboardButton("2️⃣ العدد", callback_data="count"),
-        telebot.types.InlineKeyboardButton("3️⃣ آخر الطلبات", callback_data="history"),
-        telebot.types.InlineKeyboardButton("4️⃣ إحصائيات", callback_data="stats"),
+        telebot.types.InlineKeyboardButton("📝 طلب جديد", callback_data="nm_new"),
+        telebot.types.InlineKeyboardButton("🔍 بحث", callback_data="nm_search"),
+        telebot.types.InlineKeyboardButton("📋 آخر الطلبات", callback_data="nm_history"),
+        telebot.types.InlineKeyboardButton("✏️ تعديل وحذف", callback_data="nm_edit"),
+        telebot.types.InlineKeyboardButton("📊 إحصائيات", callback_data="nm_stats"),
     )
-    nusuk_bot.send_message(chat_id,
-        f"*Nusuk Card System*\n*نظام بطاقات نسك*\n\n{DIV}\n\n"
-        f"1️⃣ طلب جديد\n2️⃣ العدد\n3️⃣ آخر ١٠\n4️⃣ إحصائيات\n\n{DIV}",
+    nusuk_bot.send_message(cid,
+        f"*🏢 Nusuk Card System*\n*نظام بطاقات نسك*\n\n"
+        f"📝 طلب جديد — New Request\n"
+        f"🔍 بحث — Search\n"
+        f"📋 آخر الطلبات — Recent\n"
+        f"✏️ تعديل وحذف — Edit/Delete\n"
+        f"📊 إحصائيات — Stats",
         parse_mode="Markdown", reply_markup=mk)
 
-state = {}
-
-@nusuk_bot.callback_query_handler(func=lambda c: c.data in ("new","count","history","stats"))
-def cb(c):
-    fn = {"new": start_req, "count": cmd_count, "history": cmd_history, "stats": cmd_stats}[c.data]
-    fn(c.message)
+@nusuk_bot.callback_query_handler(func=lambda c: c.data.startswith("nm_"))
+def cb_main(c):
+    fn = {"nm_new": start_req, "nm_search": search_menu, "nm_history": cmd_history, "nm_edit": edit_menu, "nm_stats": cmd_stats}
+    fn[c.data](c.message)
     nusuk_bot.answer_callback_query(c.id)
 
 @nusuk_bot.message_handler(commands=["start","help","menu"])
-def cmd_start(m):
-    main_menu(m.chat.id)
+def cmd_start(m): main_menu(m.chat.id)
+
+# ─────────── NEW REQUEST ───────────
+
+state = {}
 
 @nusuk_bot.message_handler(commands=["new"])
 def start_req(m=None):
     cid = m.chat.id
     state[cid] = {"step": "passport"}
     nusuk_bot.send_message(cid, f"🛂 *الخطوة 1/5 — جواز السفر*\nأرسل رقم الجواز\nمثال: `G3386134`\n\n`رجوع` للإلغاء", parse_mode="Markdown")
-start_req = start_req
 
 @nusuk_bot.message_handler(func=lambda m: state.get(m.chat.id,{}).get("step")=="passport")
 def get_pass(m):
     cid = m.chat.id; txt = m.text.strip().upper()
     if txt in ("الغاء","إلغاء","cancel","رجوع","back"): del state[cid]; main_menu(cid); return
-    if not re.match(r"^[A-Z]\d{6,9}$", txt):
-        nusuk_bot.reply_to(m, "❌ صيغة خاطئة. مثال: `G3386134`", parse_mode="Markdown"); return
+    if not re.match(r"^[A-Z]\d{6,9}$", txt): nusuk_bot.reply_to(m, "❌ صيغة خاطئة. مثال: `G3386134`", parse_mode="Markdown"); return
     state[cid]["passport"] = txt; state[cid]["step"] = "status"
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
     mk.add("📭 لم يستلم", "🔄 بدل فاقد")
@@ -132,11 +133,9 @@ def get_room(m):
     s = state[cid]
     s["room"] = txt; s["employee"] = f"{m.from_user.first_name or ''} {m.from_user.last_name or ''}".strip()
     s["date"] = datetime.now().strftime("%Y-%m-%d %H:%M"); s["step"] = "confirm"
-    st = "لم يستلم" if s["status"]=="not_received" else "بدل فاقد"
     nusuk_bot.reply_to(m,
-        f"📋 *تأكيد*\n\n{DIV}\n"
-        f"🛂 جواز: `{s['passport']}`\n📌 حالة: {st}\n🏨 سكن: {s['hotel']}\n📶 دور: {s['floor']}\n🚪 غرفة: {s['room']}\n👤 موظف: {s['employee']}\n📅 تاريخ: {s['date']}\n{DIV}\n\n"
-        "✅ أرسل `تم` للحفظ\n❌ `إلغاء` للإلغاء",
+        f"📋 *تأكيد*\n{DIV}\n"
+        f"🛂 جواز: `{s['passport']}`\n📌 حالة: {_st(s['status'])}\n🏨 سكن: {s['hotel']}\n📶 دور: {s['floor']}\n🚪 غرفة: {s['room']}\n👤 موظف: {s['employee']}\n📅 تاريخ: {s['date']}\n{DIV}\n\n✅ أرسل `تم` للحفظ\n❌ `إلغاء` للإلغاء",
         parse_mode="Markdown")
 
 @nusuk_bot.message_handler(func=lambda m: state.get(m.chat.id,{}).get("step")=="confirm")
@@ -145,80 +144,172 @@ def confirm(m):
     if txt in ("الغاء","إلغاء","cancel","رجوع","back","لا"): del state[cid]; main_menu(cid); return
     if txt in ("تم","تأكيد","confirm","yes","نعم"):
         s = state.pop(cid)
+        _db("INSERT INTO requests (passport,status,hotel,floor,room,employee,date) VALUES (?,?,?,?,?,?,?)",
+            (s["passport"],s["status"],s["hotel"],s["floor"],s["room"],s["employee"],s["date"]))
         try:
-            c = sqlite3.connect(DB_PATH)
-            c.execute("INSERT INTO requests (passport,status,hotel,floor,room,employee,date) VALUES (?,?,?,?,?,?,?)",
-                      (s["passport"],s["status"],s["hotel"],s["floor"],s["room"],s["employee"],s["date"]))
-            c.commit(); c.close()
-        except Exception as e:
-            log.warning("DB insert: %s", e)
-        # Forward to Telegram chat (if LOG_CHAT_ID set)
-        try:
-            lcid = os.environ.get("LOG_CHAT_ID", "")
-            if lcid:
-                st = "لم يستلم" if s["status"]=="not_received" else "بدل فاقد"
-                nusuk_bot.send_message(int(lcid),
-                    f"📥 *طلب جديد*\n{DIV}\n"
-                    f"🛂 جواز: `{s['passport']}`\n"
-                    f"📌 حالة: {st}\n"
-                    f"🏨 سكن: {s['hotel']}\n"
-                    f"📶 دور: {s['floor']}\n"
-                    f"🚪 غرفة: {s['room']}\n"
-                    f"👤 موظف: {s['employee']}\n"
-                    f"📅 تاريخ: {s['date']}\n{DIV}",
-                    parse_mode="Markdown")
-        except Exception as e:
-            log.warning("Log chat: %s", e)
+            lcid = os.environ.get("LOG_CHAT_ID","")
+            if lcid: nusuk_bot.send_message(int(lcid),
+                f"📥 *طلب جديد*\n{DIV}\n🛂 جواز: `{s['passport']}`\n📌 حالة: {_st(s['status'])}\n🏨 سكن: {s['hotel']}\n📶 دور: {s['floor']}\n🚪 غرفة: {s['room']}\n👤 موظف: {s['employee']}\n📅 تاريخ: {s['date']}\n{DIV}", parse_mode="Markdown")
+        except: pass
         try:
             k = json.loads(GS_KEY)
             if k:
                 gs = gspread.authorize(Credentials.from_service_account_info(k, scopes=["https://www.googleapis.com/auth/spreadsheets"])).open_by_key(SHEET_ID).sheet1
-                gs.append_row([s["date"],s["passport"],"لم يستلم" if s["status"]=="not_received" else "بدل فاقد",s["hotel"],s["floor"],s["room"],s["employee"]])
-        except Exception as e:
-            log.warning("Sheets append: %s", e)
+                gs.append_row([s["date"],s["passport"],_st(s["status"]),s["hotel"],s["floor"],s["room"],s["employee"]])
+        except: pass
         nusuk_bot.reply_to(m, f"✅ *تم الحفظ!*\n{DIV}", parse_mode="Markdown")
         main_menu(cid)
-    else:
-        nusuk_bot.reply_to(m, "أرسل `تم` أو `إلغاء`", parse_mode="Markdown")
+    else: nusuk_bot.reply_to(m, "أرسل `تم` أو `إلغاء`", parse_mode="Markdown")
 
-@nusuk_bot.message_handler(commands=["count"])
-def cmd_count(m=None):
+# ─────────── SEARCH ───────────
+
+_search_state = {}
+def search_menu(m=None):
+    cid = m.chat.id if hasattr(m,'chat') else m
+    mk = telebot.types.InlineKeyboardMarkup(row_width=1)
+    mk.add(
+        telebot.types.InlineKeyboardButton("🛂 بجواز السفر", callback_data="sr_pass"),
+        telebot.types.InlineKeyboardButton("🏨 بالسكن", callback_data="sr_hotel"),
+        telebot.types.InlineKeyboardButton("📅 بالتاريخ", callback_data="sr_date"),
+        telebot.types.InlineKeyboardButton("🔙 رجوع", callback_data="sr_back"),
+    )
+    nusuk_bot.send_message(cid, "*🔍 بحث — Search*\nاختر نوع البحث:", parse_mode="Markdown", reply_markup=mk)
+
+@nusuk_bot.callback_query_handler(func=lambda c: c.data.startswith("sr_"))
+def cb_search(c):
+    if c.data=="sr_back": nusuk_bot.answer_callback_query(c.id); main_menu(c.message.chat.id); return
+    _search_state[c.message.chat.id] = {"type": c.data.replace("sr_","")}
+    nusuk_bot.answer_callback_query(c.id)
+    nusuk_bot.send_message(c.message.chat.id, "📤 أرسل كلمة البحث\n_Send search term_", parse_mode="Markdown")
+
+@nusuk_bot.message_handler(func=lambda m: m.chat.id in _search_state)
+def do_search(m):
+    cid = m.chat.id; t = _search_state.pop(cid)
+    q = m.text.strip()
+    if q in ("الغاء","إلغاء","cancel","رجوع","back"): main_menu(cid); return
     try:
-        c = sqlite3.connect(DB_PATH)
-        n = c.execute("SELECT COUNT(*) FROM requests").fetchone()[0]; c.close()
-    except: n = 0
-    txt = f"📊 *إجمالي الطلبات:* `{n}`"
-    if m: nusuk_bot.reply_to(m, txt, parse_mode="Markdown")
+        if t["type"]=="pass":
+            rows = _db("SELECT id,passport,status,hotel,floor,room,employee,date FROM requests WHERE passport LIKE ?", (f"%{q.upper()}%",), fetch="all")
+        elif t["type"]=="hotel":
+            rows = _db("SELECT id,passport,status,hotel,floor,room,employee,date FROM requests WHERE hotel LIKE ?", (f"%{q}%",), fetch="all")
+        elif t["type"]=="date":
+            rows = _db("SELECT id,passport,status,hotel,floor,room,employee,date FROM requests WHERE date LIKE ?", (f"%{q}%",), fetch="all")
+        else: rows = []
+    except: rows = []
+    if not rows: nusuk_bot.reply_to(m, "❌ لا توجد نتائج\n_No results_", parse_mode="Markdown"); main_menu(cid); return
+    lines = [f"🔍 *نتائج البحث:* {len(rows)}"]
+    for r in rows[:10]:
+        lines.append(f"`#{r[0]}` {r[1]} — {_st(r[2])}\n  🏨{r[3]} F{r[4]} R{r[5]}")
+    if len(rows)>10: lines.append(f"\n...و{len(rows)-10} أخرى")
+    lines.append(f"\n{DIV}\n🔙 /menu")
+    nusuk_bot.reply_to(m, "\n".join(lines), parse_mode="Markdown")
+    main_menu(cid)
+
+# ─────────── HISTORY ───────────
 
 @nusuk_bot.message_handler(commands=["history"])
 def cmd_history(m=None):
-    try:
-        c = sqlite3.connect(DB_PATH)
-        rows = c.execute("SELECT passport,status,hotel,floor,room,date FROM requests ORDER BY id DESC LIMIT 10").fetchall(); c.close()
-    except: rows = []
+    rows = _db("SELECT passport,status,hotel,floor,room,date FROM requests ORDER BY id DESC LIMIT 10", fetch="all") or []
     if not rows: nusuk_bot.reply_to(m, "📭 لا توجد طلبات", parse_mode="Markdown"); return
     lines = ["🗂 *آخر ١٠:*\n"]
-    for r in rows:
-        st = "لم يستلم" if r[1]=="not_received" else "بدل فاقد"
-        lines.append(f"`{r[0]}` {st}\n  🏨{r[2]} | F{r[3]} R{r[4]} | {r[5]}")
+    for r in rows: lines.append(f"`{r[0]}` {_st(r[1])}\n  🏨{r[2]} F{r[3]} R{r[4]} | {r[5]}")
     nusuk_bot.reply_to(m, "\n".join(lines), parse_mode="Markdown")
+
+# ─────────── STATS ───────────
+
+@nusuk_bot.message_handler(commands=["count"])
+def cmd_count(m=None):
+    n = (_db("SELECT COUNT(*) FROM requests", fetch="one") or [0])[0]
+    txt = f"📊 *إجمالي الطلبات:* `{n}`"
+    if m: nusuk_bot.reply_to(m, txt, parse_mode="Markdown")
 
 @nusuk_bot.message_handler(commands=["stats"])
 def cmd_stats(m=None):
-    try:
-        c = sqlite3.connect(DB_PATH)
-        rows = c.execute("SELECT status,hotel FROM requests").fetchall(); c.close()
-    except: rows = []
+    rows = _db("SELECT status,hotel FROM requests", fetch="all") or []
     if not rows: nusuk_bot.reply_to(m, "📭 لا توجد بيانات"); return
-    statuses, hotels = {}, {}
-    for st, ho in rows:
-        statuses[st] = statuses.get(st,0)+1
-        hotels[ho] = hotels.get(ho,0)+1
+    sts, hts = {}, {}
+    for st, ho in rows: sts[st]=sts.get(st,0)+1; hts[ho]=hts.get(ho,0)+1
     lines = ["📈 *إحصائيات*\n\n*حسب الحالة:*"]
-    for s,n in statuses.items(): lines.append(f"  {s}: `{n}`")
+    for s,n in sts.items(): lines.append(f"  {_st(s)}: `{n}`")
     lines.append("\n*حسب السكن:*")
-    for h,n in sorted(hotels.items(), key=lambda x:-x[1]): lines.append(f"  {h}: `{n}`")
+    for h,n in sorted(hts.items(), key=lambda x:-x[1]): lines.append(f"  {h}: `{n}`")
     nusuk_bot.reply_to(m, "\n".join(lines), parse_mode="Markdown")
+
+# ─────────── EDIT / DELETE ───────────
+
+_edit_state = {}
+def edit_menu(m=None):
+    cid = m.chat.id if hasattr(m,'chat') else m
+    nusuk_bot.send_message(cid, "✏️ أرسل **رقم الطلب** (ID) الموجود في نهاية كل طلب\nex: `#1`\n\nأو أرسل `/menu` للرجوع", parse_mode="Markdown")
+    _edit_state[cid] = {"step": "id"}
+
+@nusuk_bot.message_handler(func=lambda m: _edit_state.get(m.chat.id,{}).get("step")=="id")
+def edit_get_id(m):
+    cid = m.chat.id; txt = m.text.strip().replace("#","")
+    if txt in ("الغاء","إلغاء","cancel","رجوع","back","/menu"): del _edit_state[cid]; main_menu(cid); return
+    if not txt.isdigit(): nusuk_bot.reply_to(m, "❌ أرسل رقم ID صحيح"); return
+    row = _db("SELECT * FROM requests WHERE id=?", (int(txt),), fetch="one")
+    if not row: nusuk_bot.reply_to(m, "❌ لا يوجد طلب بهذا الرقم"); return
+    _edit_state[cid] = {"step": "action", "id": row[0], "data": row[1:]}
+    mk = telebot.types.InlineKeyboardMarkup(row_width=2)
+    mk.add(
+        telebot.types.InlineKeyboardButton("🔄 تعديل", callback_data=f"ed_edit_{row[0]}"),
+        telebot.types.InlineKeyboardButton("🗑 حذف", callback_data=f"ed_del_{row[0]}"),
+        telebot.types.InlineKeyboardButton("🔙 رجوع", callback_data="ed_back"),
+    )
+    d = row; st = _st(d[2])
+    nusuk_bot.reply_to(m,
+        f"*طلب #{d[0]}*\n{DIV}\n"
+        f"🛂 جواز: `{d[1]}`\n📌 حالة: {st}\n🏨 سكن: {d[3]}\n📶 دور: {d[4]}\n🚪 غرفة: {d[5]}\n👤 موظف: {d[6]}\n📅 تاريخ: {d[7]}\n{DIV}",
+        parse_mode="Markdown", reply_markup=mk)
+
+@nusuk_bot.callback_query_handler(func=lambda c: c.data.startswith("ed_"))
+def cb_edit(c):
+    cid = c.message.chat.id
+    parts = c.data.split("_")
+    action, rid = parts[1], int(parts[2])
+    nusuk_bot.answer_callback_query(c.id)
+    if action=="back": del _edit_state[cid]; main_menu(cid); return
+    if action=="del":
+        _db("DELETE FROM requests WHERE id=?", (rid,))
+        nusuk_bot.send_message(cid, f"✅ *تم حذف الطلب #{rid}*", parse_mode="Markdown")
+        del _edit_state[cid]; main_menu(cid); return
+    if action=="edit":
+        _edit_state[cid] = {"step": "field", "id": rid}
+        mk = telebot.types.InlineKeyboardMarkup(row_width=2)
+        mk.add(
+            telebot.types.InlineKeyboardButton("🛂 جواز", callback_data=f"ef_pass_{rid}"),
+            telebot.types.InlineKeyboardButton("📌 حالة", callback_data=f"ef_status_{rid}"),
+            telebot.types.InlineKeyboardButton("🏨 سكن", callback_data=f"ef_hotel_{rid}"),
+            telebot.types.InlineKeyboardButton("📶 دور", callback_data=f"ef_floor_{rid}"),
+            telebot.types.InlineKeyboardButton("🚪 غرفة", callback_data=f"ef_room_{rid}"),
+            telebot.types.InlineKeyboardButton("🔙 رجوع", callback_data="ed_back"),
+        )
+        nusuk_bot.send_message(cid, "✏️ اختر الحقل للتعديل:", reply_markup=mk)
+
+@nusuk_bot.callback_query_handler(func=lambda c: c.data.startswith("ef_"))
+def cb_edit_field(c):
+    cid = c.message.chat.id; parts = c.data.split("_")
+    field, rid = parts[1], int(parts[2])
+    _edit_state[cid] = {"step": "value", "id": rid, "field": field}
+    nusuk_bot.answer_callback_query(c.id)
+    names = {"pass":"رقم الجواز","status":"الحالة","hotel":"السكن","floor":"الدور","room":"الغرفة"}
+    nusuk_bot.send_message(cid, f"✏️ أرسل القيمة الجديدة لـ *{names.get(field,field)}*:", parse_mode="Markdown")
+
+@nusuk_bot.message_handler(func=lambda m: _edit_state.get(m.chat.id,{}).get("step")=="value")
+def edit_set_value(m):
+    cid = m.chat.id; txt = m.text.strip()
+    if txt in ("الغاء","إلغاء","cancel","رجوع","back"): del _edit_state[cid]; main_menu(cid); return
+    s = _edit_state[cid]; field = s["field"]; rid = s["id"]
+    col = {"pass":"passport","status":"status","hotel":"hotel","floor":"floor","room":"room"}[field]
+    val = txt.upper() if field=="pass" else txt
+    if field=="status":
+        if "لم يستلم" in val: val = "not_received"
+        elif "فاقد" in val or "بدل" in val: val = "lost"
+        else: nusuk_bot.reply_to(m, "❌ اختر: لم يستلم أو بدل فاقد"); return
+    _db(f"UPDATE requests SET {col}=? WHERE id=?", (val, rid))
+    nusuk_bot.reply_to(m, f"✅ *تم التحديث!*", parse_mode="Markdown")
+    del _edit_state[cid]; main_menu(cid)
 
 # ─────────── BUILDING MAPS ───────────
 
@@ -273,11 +364,8 @@ if ROOM_TOKEN:
                         rn = parts[4].strip()
                         parts_rn = rn.split("_")
                         if len(parts_rn) >= 5:
-                            hotel = parts_rn[0]
-                            floor = parts_rn[2]
-                            room = parts_rn[4]
-                        else:
-                            hotel, floor, room = rn, "", ""
+                            hotel = parts_rn[0]; floor = parts_rn[2]; room = parts_rn[4]
+                        else: hotel, floor, room = rn, "", ""
                         rows.append((pid, hotel, floor, room))
                 _data_cache[0] = rows
                 log.info("Room data loaded: %d records", len(rows))
@@ -288,8 +376,7 @@ if ROOM_TOKEN:
 
         @room_bot.message_handler(commands=["refresh"])
         def rr(m):
-            _data_cache[0] = None
-            d = _load_data()
+            _data_cache[0] = None; d = _load_data()
             room_bot.reply_to(m, f"✅ تم التحديث  ·  _Updated_ — {len(d)} حاج / pilgrims")
 
         @room_bot.message_handler(func=lambda m: m.text and not m.text.startswith("/"))
@@ -308,8 +395,7 @@ if ROOM_TOKEN:
                                  f"🏨 Building | المبنى: {hotel}\n"
                                  f"📶 Floor | الدور: {floor}\n"
                                  f"🚪 Room | الغرفة: {room}")
-                        if map_url:
-                            reply += f"\n📍 [📍 Location | الموقع]({map_url})"
+                        if map_url: reply += f"\n📍 [📍 Location | الموقع]({map_url})"
                         reply += f"\n\n🙏 Hajj Mabrur | حج مبرور"
                         room_bot.reply_to(m, reply, parse_mode="Markdown", disable_web_page_preview=False)
                         return
@@ -342,10 +428,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upd = telebot.types.Update.de_json(json.loads(body))
             if self.path == "/room_webhook":
                 if room_bot: room_bot.process_new_updates([upd])
-            else:
-                nusuk_bot.process_new_updates([upd])
-        except Exception as e:
-            log.error("Webhook: %s", e)
+            else: nusuk_bot.process_new_updates([upd])
+        except: pass
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
@@ -354,7 +438,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # ─────────── MAIN ───────────
 
 if __name__ == "__main__":
-    # Remove old webhook if any
     try: nusuk_bot.remove_webhook()
     except: pass
     if room_bot:
@@ -362,7 +445,6 @@ if __name__ == "__main__":
         except: pass
 
     if RENDER_URL:
-        # Webhook mode (Render)
         for a in range(3):
             try: nusuk_bot.set_webhook(url=f"{RENDER_URL}/webhook"); log.info("Nusuk webhook set"); break
             except Exception as e: log.warning("Nusuk webhook attempt %d: %s", a+1, e); time.sleep(2)
@@ -370,7 +452,6 @@ if __name__ == "__main__":
             for a in range(3):
                 try: room_bot.set_webhook(url=f"{RENDER_URL}/room_webhook"); log.info("Room webhook set"); break
                 except Exception as e: log.warning("Room webhook attempt %d: %s", a+1, e); time.sleep(2)
-        # Keep-alive
         def _p():
             while True:
                 time.sleep(600)
@@ -379,13 +460,11 @@ if __name__ == "__main__":
         threading.Thread(target=_p, daemon=True).start()
         log.info("Keep-alive started → every 10 min")
     else:
-        # Polling mode (local server)
         threading.Thread(target=nusuk_bot.infinity_polling, daemon=True, name="nusuk-poll").start()
         if room_bot:
             threading.Thread(target=room_bot.infinity_polling, daemon=True, name="room-poll").start()
         log.info("Polling started")
 
-    # HTTP server for health checks
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
     log.info("Hajj Bots - listening :%d", PORT)
