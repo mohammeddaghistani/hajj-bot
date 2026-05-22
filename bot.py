@@ -354,30 +354,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # ─────────── MAIN ───────────
 
 if __name__ == "__main__":
-    wh_url = f"{RENDER_URL}/webhook" if RENDER_URL else ""
-    room_wh = f"{RENDER_URL}/room_webhook" if RENDER_URL else ""
+    # Remove old webhook if any
+    try: nusuk_bot.remove_webhook()
+    except: pass
+    if room_bot:
+        try: room_bot.remove_webhook()
+        except: pass
 
-    for a in range(3):
-        try: nusuk_bot.set_webhook(url=wh_url); log.info("Nusuk webhook set"); break
-        except Exception as e: log.warning("Nusuk webhook attempt %d: %s", a+1, e); time.sleep(2)
-
-    if room_bot and room_wh:
-        for a in range(3):
-            try: room_bot.set_webhook(url=room_wh); log.info("Room webhook set"); break
-            except Exception as e: log.warning("Room webhook attempt %d: %s", a+1, e); time.sleep(2)
-
-    # Keep-alive (every 10 min to prevent Render free-tier spin-down)
     if RENDER_URL:
+        # Webhook mode (Render)
+        for a in range(3):
+            try: nusuk_bot.set_webhook(url=f"{RENDER_URL}/webhook"); log.info("Nusuk webhook set"); break
+            except Exception as e: log.warning("Nusuk webhook attempt %d: %s", a+1, e); time.sleep(2)
+        if room_bot:
+            for a in range(3):
+                try: room_bot.set_webhook(url=f"{RENDER_URL}/room_webhook"); log.info("Room webhook set"); break
+                except Exception as e: log.warning("Room webhook attempt %d: %s", a+1, e); time.sleep(2)
+        # Keep-alive
         def _p():
             while True:
                 time.sleep(600)
-                try:
-                    urllib.request.urlopen(f"{RENDER_URL}/", timeout=10)
-                except:
-                    pass
+                try: urllib.request.urlopen(f"{RENDER_URL}/", timeout=10)
+                except: pass
         threading.Thread(target=_p, daemon=True).start()
         log.info("Keep-alive started → every 10 min")
+    else:
+        # Polling mode (local server)
+        threading.Thread(target=nusuk_bot.infinity_polling, daemon=True, name="nusuk-poll").start()
+        if room_bot:
+            threading.Thread(target=room_bot.infinity_polling, daemon=True, name="room-poll").start()
+        log.info("Polling started")
 
+    # HTTP server for health checks
     socketserver.TCPServer.allow_reuse_address = True
     server = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
     log.info("Hajj Bots - listening :%d", PORT)
