@@ -36,7 +36,7 @@ try:
     c.close(); log.info("DB ready")
 except Exception as e: log.warning("DB init: %s", e)
 
-H = "\u2500" * 36
+H = ""
 
 # ─────────── HELPERS ───────────
 
