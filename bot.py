@@ -40,7 +40,18 @@ DIV = "▬" * 30
 
 # ─────────── HELPERS ───────────
 
-def _st(s): return "لم يستلم" if s=="not_received" else "بدل فاقد"
+STATUS_NAMES = {
+    "not_received": "📭 لم يستلم",
+    "lost": "🔄 بدل فاقد",
+    "photo_mismatch": "🖼 الصورة غير مطابقة",
+    "data_diff": "📋 اختلاف في البيانات",
+    "photo_diff": "📸 اختلاف في الصورة",
+}
+def _st(s): return STATUS_NAMES.get(s, s)
+def _st_code(s):
+    for k,v in STATUS_NAMES.items():
+        if any(w in s for w in v.split()): return k
+    return s
 def _db(sql, params=(), fetch=None):
     c = sqlite3.connect(DB_PATH)
     r = c.execute(sql, params)
@@ -103,17 +114,17 @@ def get_pass(m):
             parse_mode="Markdown")
         del state[cid]; return
     state[cid]["passport"] = txt; state[cid]["step"] = "status"
-    mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
-    mk.add("📭 لم يستلم", "🔄 بدل فاقد")
+    mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=1)
+    for v in STATUS_NAMES.values(): mk.add(v)
     nusuk_bot.reply_to(m, "📌 *الخطوة 2/5 — الحالة*\nاختر:", reply_markup=mk, parse_mode="Markdown")
 
 @nusuk_bot.message_handler(func=lambda m: state.get(m.chat.id,{}).get("step")=="status")
 def get_status(m):
     cid = m.chat.id; txt = m.text.strip()
     if txt in ("الغاء","إلغاء","cancel","رجوع","back"): del state[cid]; main_menu(cid); return
-    if "لم يستلم" in txt: state[cid]["status"] = "not_received"
-    elif "فاقد" in txt or "بدل" in txt: state[cid]["status"] = "lost"
-    else: nusuk_bot.reply_to(m, "❌ استخدم الأزرار"); return
+    code = _st_code(txt)
+    if code not in STATUS_NAMES: nusuk_bot.reply_to(m, "❌ استخدم الأزرار"); return
+    state[cid]["status"] = code
     state[cid]["step"] = "hotel"
     nusuk_bot.reply_to(m, "🏨 *الخطوة 3/5 — السكن*\nأرسل اسم السكن:", parse_mode="Markdown", reply_markup=telebot.types.ReplyKeyboardRemove())
 
@@ -312,9 +323,8 @@ def edit_set_value(m):
     col = {"pass":"passport","status":"status","hotel":"hotel","floor":"floor","room":"room"}[field]
     val = txt.upper() if field=="pass" else txt
     if field=="status":
-        if "لم يستلم" in val: val = "not_received"
-        elif "فاقد" in val or "بدل" in val: val = "lost"
-        else: nusuk_bot.reply_to(m, "❌ اختر: لم يستلم أو بدل فاقد"); return
+        val = _st_code(val)
+        if val not in STATUS_NAMES: nusuk_bot.reply_to(m, "❌ اختر حالة صحيحة"); return
     _db(f"UPDATE requests SET {col}=? WHERE id=?", (val, rid))
     nusuk_bot.reply_to(m, f"✅ *تم التحديث!*", parse_mode="Markdown")
     del _edit_state[cid]; main_menu(cid)
