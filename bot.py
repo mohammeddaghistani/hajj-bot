@@ -595,14 +595,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def _del_webhooks():
     for bot in [nusuk_bot, room_bot]:
         if not bot: continue
-        for a in range(3):
-            try:
-                bot.remove_webhook(drop_pending_updates=True)
-                log.info("Webhook removed for %s", bot.token[:8])
-                break
-            except Exception as e:
-                log.warning("remove_webhook attempt %d: %s", a+1, e)
-                time.sleep(1)
+        bot.remove_webhook()
+        try:
+            u = urllib.request.urlopen(f"https://api.telegram.org/bot{bot.token}/deleteWebhook?drop_pending_updates=true", timeout=5)
+            log.info("Webhook deleted for %s (drop_pending)", bot.token[:8])
+            u.read()
+        except Exception as e:
+            log.warning("deleteWebhook API call: %s", e)
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     _del_webhooks()
