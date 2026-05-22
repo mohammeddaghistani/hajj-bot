@@ -94,6 +94,14 @@ def get_pass(m):
     cid = m.chat.id; txt = m.text.strip().upper()
     if txt in ("الغاء","إلغاء","cancel","رجوع","back"): del state[cid]; main_menu(cid); return
     if not re.match(r"^[A-Z]\d{6,9}$", txt): nusuk_bot.reply_to(m, "❌ صيغة خاطئة. مثال: `G3386134`", parse_mode="Markdown"); return
+    exists = _db("SELECT id FROM requests WHERE passport=?", (txt,), fetch="one")
+    if exists:
+        nusuk_bot.reply_to(m,
+            f"⚠️ *يوجد طلب سابق لهذا الجواز*\n_Duplicate passport_\n{DIV}\n"
+            f"🆔 `{txt}` — الطلب رقم `#{exists[0]}`\n{DIV}\n"
+            f"📌 جاري العمل عليه بالفعل",
+            parse_mode="Markdown")
+        del state[cid]; return
     state[cid]["passport"] = txt; state[cid]["step"] = "status"
     mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True, row_width=2)
     mk.add("📭 لم يستلم", "🔄 بدل فاقد")
