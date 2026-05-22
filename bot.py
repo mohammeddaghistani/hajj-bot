@@ -617,9 +617,33 @@ if __name__ == "__main__":
         threading.Thread(target=_p, daemon=True).start()
         log.info("Keep-alive started \u2192 every 10 min")
     else:
-        threading.Thread(target=nusuk_bot.infinity_polling, daemon=True, name="nusuk-poll").start()
+        def _poll(name, bot):
+            while True:
+                try:
+                    bot.remove_webhook()
+                    urllib.request.urlopen(f"https://api.telegram.org/bot{bot.token}/deleteWebhook?drop_pending_updates=true", timeout=5)
+                    bot.infinity_polling(timeout=60, long_polling_timeout=30, logger=log)
+                except Exception as e:
+                    log.warning("%s polling error: %s", name, e)
+                    time.sleep(3)
+        def _wh_watch():
+            while True:
+                time.sleep(30)
+                for b in [nusuk_bot, room_bot]:
+                    if not b: continue
+                    try:
+                        u = urllib.request.urlopen(f"https://api.telegram.org/bot{b.token}/getWebhookInfo", timeout=5)
+                        info = json.loads(u.read().decode())
+                        url = info.get("result",{}).get("url","")
+                        if url and "render" in url.lower():
+                            b.remove_webhook()
+                            urllib.request.urlopen(f"https://api.telegram.org/bot{b.token}/deleteWebhook?drop_pending_updates=true", timeout=5)
+                            log.info("Webhook from Render cleared for %s", b.token[:8])
+                    except: pass
+        threading.Thread(target=_wh_watch, daemon=True, name="wh-watch").start()
+        threading.Thread(target=_poll, args=("nusuk", nusuk_bot), daemon=True, name="nusuk-poll").start()
         if room_bot:
-            threading.Thread(target=room_bot.infinity_polling, daemon=True, name="room-poll").start()
+            threading.Thread(target=_poll, args=("room", room_bot), daemon=True, name="room-poll").start()
         log.info("Polling started")
 
     socketserver.TCPServer.allow_reuse_address = True
