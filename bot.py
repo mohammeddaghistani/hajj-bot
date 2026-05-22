@@ -622,7 +622,7 @@ if __name__ == "__main__":
                 try:
                     bot.remove_webhook()
                     urllib.request.urlopen(f"https://api.telegram.org/bot{bot.token}/deleteWebhook?drop_pending_updates=true", timeout=5)
-                    bot.infinity_polling(timeout=60, long_polling_timeout=30, logger=log)
+                    bot.infinity_polling(timeout=60, long_polling_timeout=30)
                 except Exception as e:
                     log.warning("%s polling error: %s", name, e)
                     time.sleep(3)
